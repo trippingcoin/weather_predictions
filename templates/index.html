@@ -1,0 +1,133 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Rain Prediction System</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f5f7fa;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+    }
+    .container {
+      background: white;
+      padding: 25px 35px;
+      border-radius: 15px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
+      max-width: 450px;
+    }
+    h2 {
+      text-align: center;
+      margin-bottom: 20px;
+    }
+    label {
+      display: block;
+      margin-top: 10px;
+      font-weight: bold;
+    }
+    input, select {
+      width: 100%;
+      padding: 8px;
+      margin-top: 5px;
+      border: 1px solid #ccc;
+      border-radius: 5px;
+    }
+    button {
+      margin-top: 20px;
+      width: 100%;
+      background: #007bff;
+      color: white;
+      padding: 10px;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+      font-size: 16px;
+    }
+    button:hover {
+      background: #0056b3;
+    }
+    #result {
+      text-align: center;
+      margin-top: 20px;
+      font-size: 18px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>🌦 Rain Prediction</h2>
+
+    <label for="city">Select City:</label>
+    <select id="city">
+      <option value="Astana">Astana</option>
+      <option value="Almaty">Almaty</option>
+      <option value="Shymkent">Shymkent</option>
+      <option value="Karaganda">Karaganda</option>
+    </select>
+
+    <label for="temperature">Temperature (°C):</label>
+    <input type="number" id="temperature" step="0.1" placeholder="e.g. 10">
+
+    <label for="humidity">Humidity (%):</label>
+    <input type="number" id="humidity" placeholder="e.g. 70">
+
+    <label for="pressure">Pressure (hPa):</label>
+    <input type="number" id="pressure" placeholder="e.g. 1015">
+
+    <label for="wind_speed">Wind Speed (m/s):</label>
+    <input type="number" id="wind_speed" step="0.1" placeholder="e.g. 3.5">
+
+    <label for="hours_ahead">Forecast Hours Ahead:</label>
+    <input type="number" id="hours_ahead" placeholder="e.g. 6">
+
+    <label for="model">Select Model:</label>
+    <select id="model">
+      <option value="Random Forest">Random Forest</option>
+      <option value="Gradient Boosting">Gradient Boosting</option>
+      <option value="Logistic Regression">Logistic Regression</option>
+    </select>
+
+    <button id="predict">Predict Rain</button>
+
+    <div id="result"></div>
+  </div>
+
+  <script>
+    document.getElementById("predict").onclick = async () => {
+      const data = {
+        model: document.getElementById("model").value,
+        temperature: parseFloat(document.getElementById("temperature").value),
+        humidity: parseFloat(document.getElementById("humidity").value),
+        pressure: parseFloat(document.getElementById("pressure").value),
+        wind_speed: parseFloat(document.getElementById("wind_speed").value),
+        hours_ahead: parseFloat(document.getElementById("hours_ahead").value),
+        city: document.getElementById("city").value
+      };
+
+      const res = await fetch("/train_predict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(data)
+      });
+
+      const resultDiv = document.getElementById("result");
+      const response = await res.json();
+
+      if (response.error) {
+        resultDiv.innerText = "Error: " + response.error;
+        resultDiv.style.color = "red";
+      } else {
+        resultDiv.innerHTML = `
+          🌧 Rain Probability: <b>${response.rain_probability}%</b><br>
+          📈 Model Accuracy: <b>${response.accuracy}%</b>
+        `;
+        resultDiv.style.color = "black";
+      }
+    };
+  </script>
+</body>
+</html>
