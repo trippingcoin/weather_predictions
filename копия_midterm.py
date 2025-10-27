@@ -13,32 +13,40 @@ API_KEY = "cd59f6e78b8ec3e0d4b69f9e55d80e1c"
 
 CITY_QUERIES = {
     # Republican cities
-    "Astana":        ["Astana,KZ", "Nur-Sultan,KZ", "Akmola,KZ"],
-    "Almaty":        ["Almaty,KZ", "Alma-Ata,KZ"],
-    "Shymkent":      ["Shymkent,KZ", "Chimkent,KZ"],
-
+    "Astana": ["Astana,KZ", "Nur-Sultan,KZ", "Akmola,KZ"],
+    "Almaty": ["Almaty,KZ", "Alma-Ata,KZ"],
+    "Shymkent": ["Shymkent,KZ", "Chimkent,KZ"],
     # Regional centers (current)
-    "Akmola (Kokshetau)":   ["Kokshetau,KZ", "Kokchetav,KZ"],
-    "Atyrau":               ["Atyrau,KZ"],
-    "Aktobe":               ["Aktobe,KZ", "Aqtobe,KZ"],
-    "Abai (Semey)":         ["Semey,KZ", "Semei,KZ", "Semipalatinsk,KZ"],
-    "Ulytau (Zhezqazghan)": ["Zhezqazghan,KZ", "Zhezkazgan,KZ", "Dzhezkazgan,KZ", "Jezkazgan,KZ"],
+    "Akmola (Kokshetau)": ["Kokshetau,KZ", "Kokchetav,KZ"],
+    "Atyrau": ["Atyrau,KZ"],
+    "Aktobe": ["Aktobe,KZ", "Aqtobe,KZ"],
+    "Abai (Semey)": ["Semey,KZ", "Semei,KZ", "Semipalatinsk,KZ"],
+    "Ulytau (Zhezqazghan)": [
+        "Zhezqazghan,KZ",
+        "Zhezkazgan,KZ",
+        "Dzhezkazgan,KZ",
+        "Jezkazgan,KZ",
+    ],
     "Jetisu (Taldykorgan)": ["Taldykorgan,KZ", "Taldyqorghan,KZ"],
-    "Oskemen":              ["Oskemen,KZ", "Ust-Kamenogorsk,KZ"],
-    "Karaganda":            ["Karaganda,KZ"],
-    "Kostanay":             ["Kostanay,KZ", "Kustanay,KZ"],
-    "Kyzylorda":            ["Kyzylorda,KZ"],
-    "Mangystau (Aktau)":    ["Aktau,KZ"],
-    "Petropavl":            ["Petropavl,KZ", "Petropavlovsk,KZ"],
-    "Pavlodar":             ["Pavlodar,KZ"],
-    "Turkistan":            ["Turkistan,KZ", "Turkestan,KZ"],
-    "Oral":                 ["Oral,KZ", "Uralsk,KZ"],
+    "Oskemen": ["Oskemen,KZ", "Ust-Kamenogorsk,KZ"],
+    "Karaganda": ["Karaganda,KZ"],
+    "Kostanay": ["Kostanay,KZ", "Kustanay,KZ"],
+    "Kyzylorda": ["Kyzylorda,KZ"],
+    "Mangystau (Aktau)": ["Aktau,KZ"],
+    "Petropavl": ["Petropavl,KZ", "Petropavlovsk,KZ"],
+    "Pavlodar": ["Pavlodar,KZ"],
+    "Turkistan": ["Turkistan,KZ", "Turkestan,KZ"],
+    "Oral": ["Oral,KZ", "Uralsk,KZ"],
 }
+
 
 def geocode_best(q_list):
     for q in q_list:
-        r = requests.get("https://api.openweathermap.org/geo/1.0/direct",
-                         params={"q": q, "limit": 1, "appid": API_KEY}, timeout=20)
+        r = requests.get(
+            "https://api.openweathermap.org/geo/1.0/direct",
+            params={"q": q, "limit": 1, "appid": API_KEY},
+            timeout=20,
+        )
         if r.status_code != 200:
             time.sleep(1)
             continue
@@ -49,13 +57,23 @@ def geocode_best(q_list):
         time.sleep(0.5)
     return None
 
+
 def fetch_forecast(lat, lon):
-    r = requests.get("https://api.openweathermap.org/data/2.5/forecast",
-                     params={"lat": lat, "lon": lon, "appid": API_KEY,
-                             "units": "metric", "lang": "en"}, timeout=30)
+    r = requests.get(
+        "https://api.openweathermap.org/data/2.5/forecast",
+        params={
+            "lat": lat,
+            "lon": lon,
+            "appid": API_KEY,
+            "units": "metric",
+            "lang": "en",
+        },
+        timeout=30,
+    )
     if r.status_code != 200:
         return None
     return r.json()
+
 
 rows, per_city_counts = [], {}
 
@@ -74,21 +92,23 @@ for label, qlist in CITY_QUERIES.items():
 
     added = 0
     for it in data["list"]:
-        rows.append({
-            "city": label,
-            "datetime": it.get("dt_txt"),
-            "temp": it["main"]["temp"],
-            "feels_like": it["main"]["feels_like"],
-            "pressure": it["main"]["pressure"],
-            "humidity": it["main"]["humidity"],
-            "clouds": it["clouds"]["all"],
-            "wind_speed": it["wind"]["speed"],
-            "wind_deg": it["wind"].get("deg"),
-            "pop": it.get("pop", 0),
-            "rain_3h": it.get("rain", {}).get("3h", 0),
-            "snow_3h": it.get("snow", {}).get("3h", 0),
-            "weather_main": it["weather"][0]["main"],
-        })
+        rows.append(
+            {
+                "city": label,
+                "datetime": it.get("dt_txt"),
+                "temp": it["main"]["temp"],
+                "feels_like": it["main"]["feels_like"],
+                "pressure": it["main"]["pressure"],
+                "humidity": it["main"]["humidity"],
+                "clouds": it["clouds"]["all"],
+                "wind_speed": it["wind"]["speed"],
+                "wind_deg": it["wind"].get("deg"),
+                "pop": it.get("pop", 0),
+                "rain_3h": it.get("rain", {}).get("3h", 0),
+                "snow_3h": it.get("snow", {}).get("3h", 0),
+                "weather_main": it["weather"][0]["main"],
+            }
+        )
         added += 1
 
     per_city_counts[label] = added
@@ -103,6 +123,7 @@ print("\n Done! Total rows:", df.shape[0])
 print("Per city:", per_city_counts)
 
 from google.colab import files
+
 df = pd.read_csv("weather_data.csv")
 df.head(5)
 
@@ -114,12 +135,24 @@ import pandas as pd
 # 1) Quick audit
 print("Missing BEFORE:\n", df.isna().sum().sort_values(ascending=False))
 
-num_cols = [c for c in [
-    "temp","feels_like","pressure","humidity","clouds",
-    "wind_speed","wind_deg","pop","rain_3h","snow_3h"
-] if c in df.columns]
+num_cols = [
+    c
+    for c in [
+        "temp",
+        "feels_like",
+        "pressure",
+        "humidity",
+        "clouds",
+        "wind_speed",
+        "wind_deg",
+        "pop",
+        "rain_3h",
+        "snow_3h",
+    ]
+    if c in df.columns
+]
 
-cat_cols = [c for c in ["city","weather_main"] if c in df.columns]
+cat_cols = [c for c in ["city", "weather_main"] if c in df.columns]
 
 # 3) Impute numeric with median
 for c in num_cols:
@@ -139,11 +172,11 @@ if "datetime" in df.columns and df["datetime"].isna().any():
 # 6) Target check (ensure binary and no NaNs)
 if "RainOrNot" in df.columns:
     if df["RainOrNot"].isna().any():
-        if {"rain_3h","snow_3h"}.issubset(df.columns):
+        if {"rain_3h", "snow_3h"}.issubset(df.columns):
             mask = df["RainOrNot"].isna()
             df.loc[mask, "RainOrNot"] = (
-                (df.loc[mask, "rain_3h"].fillna(0) > 0) |
-                (df.loc[mask, "snow_3h"].fillna(0) > 0)
+                (df.loc[mask, "rain_3h"].fillna(0) > 0)
+                | (df.loc[mask, "snow_3h"].fillna(0) > 0)
             ).astype(int)
     df["RainOrNot"] = df["RainOrNot"].fillna(0).astype(int)
 
@@ -156,6 +189,7 @@ print("=== Outlier Handling (IQR winsorization) ===")
 num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
 num_cols = [c for c in num_cols if c != "RainOrNot"]
 
+
 def iqr_caps(s, k=1.5):
     q1 = s.quantile(0.25)
     q3 = s.quantile(0.75)
@@ -166,16 +200,24 @@ def iqr_caps(s, k=1.5):
     high = q3 + k * iqr
     return low, high
 
+
 report_rows = []
 
 for col in num_cols:
     low, high = iqr_caps(df[col])
     if low is None:  # constant or empty column
-        report_rows.append({
-            "column": col, "Q1": df[col].quantile(0.25), "Q3": df[col].quantile(0.75),
-            "IQR": 0.0, "low_cap": None, "high_cap": None,
-            "n_clipped_low": 0, "n_clipped_high": 0
-        })
+        report_rows.append(
+            {
+                "column": col,
+                "Q1": df[col].quantile(0.25),
+                "Q3": df[col].quantile(0.75),
+                "IQR": 0.0,
+                "low_cap": None,
+                "high_cap": None,
+                "n_clipped_low": 0,
+                "n_clipped_high": 0,
+            }
+        )
         continue
 
     # count before
@@ -185,21 +227,27 @@ for col in num_cols:
     # apply capping
     df[col] = df[col].clip(lower=low, upper=high)
 
-    report_rows.append({
-        "column": col,
-        "Q1": df[col].quantile(0.25),
-        "Q3": df[col].quantile(0.75),
-        "IQR": df[col].quantile(0.75) - df[col].quantile(0.25),
-        "low_cap": low,
-        "high_cap": high,
-        "n_clipped_low": int(n_low),
-        "n_clipped_high": int(n_high)
-    })
+    report_rows.append(
+        {
+            "column": col,
+            "Q1": df[col].quantile(0.25),
+            "Q3": df[col].quantile(0.75),
+            "IQR": df[col].quantile(0.75) - df[col].quantile(0.25),
+            "low_cap": low,
+            "high_cap": high,
+            "n_clipped_low": int(n_low),
+            "n_clipped_high": int(n_high),
+        }
+    )
 
-report = pd.DataFrame(report_rows).sort_values(by=["n_clipped_low","n_clipped_high"], ascending=False).reset_index(drop=True)
+report = (
+    pd.DataFrame(report_rows)
+    .sort_values(by=["n_clipped_low", "n_clipped_high"], ascending=False)
+    .reset_index(drop=True)
+)
 
 print("\nSummary of capping (most affected first):")
-print(report[["column","low_cap","high_cap","n_clipped_low","n_clipped_high"]])
+print(report[["column", "low_cap", "high_cap", "n_clipped_low", "n_clipped_high"]])
 
 print("\nOutlier winsorization completed. Shape:", df.shape)
 
@@ -217,9 +265,7 @@ encoded = encoder.fit_transform(df[cat_cols])
 
 # 4 Create encoded DataFrame with readable column names
 encoded_df = pd.DataFrame(
-    encoded,
-    columns=encoder.get_feature_names_out(cat_cols),
-    index=df.index
+    encoded, columns=encoder.get_feature_names_out(cat_cols), index=df.index
 )
 
 # 5 Concatenate with original numeric data
@@ -249,22 +295,30 @@ X_train, X_test, y_train, y_test = train_test_split(
 # --- 3) Fit scaler on TRAIN only, apply to both
 scaler = StandardScaler()
 X_train_scaled = X_train.copy()
-X_test_scaled  = X_test.copy()
+X_test_scaled = X_test.copy()
 
 X_train_scaled[num_cols] = scaler.fit_transform(X_train[num_cols])
-X_test_scaled[num_cols]  = scaler.transform(X_test[num_cols])
+X_test_scaled[num_cols] = scaler.transform(X_test[num_cols])
 
 # --- 4) Quick sanity check (should be ~0 mean, ~1 std on TRAIN numerics)
-desc_train = pd.DataFrame(X_train_scaled[num_cols].agg(['mean','std']).T)
+desc_train = pd.DataFrame(X_train_scaled[num_cols].agg(["mean", "std"]).T)
 print("Scaled numeric columns (train) — mean/std:\n", desc_train.head())
 
-print("\nShapes:",
-      "\n  X_train:", X_train.shape,
-      "\n  X_train_scaled:", X_train_scaled.shape,
-      "\n  X_test:", X_test.shape,
-      "\n  X_test_scaled:", X_test_scaled.shape,
-      "\n  y_train:", y_train.shape,
-      "\n  y_test:", y_test.shape)
+print(
+    "\nShapes:",
+    "\n  X_train:",
+    X_train.shape,
+    "\n  X_train_scaled:",
+    X_train_scaled.shape,
+    "\n  X_test:",
+    X_test.shape,
+    "\n  X_test_scaled:",
+    X_test_scaled.shape,
+    "\n  y_train:",
+    y_train.shape,
+    "\n  y_test:",
+    y_test.shape,
+)
 
 print("\nClass distribution:")
 print("Train:\n", y_train.value_counts(normalize=True).round(3))
@@ -274,61 +328,77 @@ if "datetime" in df.columns and not np.issubdtype(df["datetime"].dtype, np.datet
     df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
 
 # 1) Time-based features (3h granularity)
-df["hour"]      = df["datetime"].dt.hour
-df["dow"]       = df["datetime"].dt.dayofweek  # 0=Mon
-df["month"]     = df["datetime"].dt.month
-df["is_weekend"]= (df["dow"] >= 5).astype(int)
+df["hour"] = df["datetime"].dt.hour
+df["dow"] = df["datetime"].dt.dayofweek  # 0=Mon
+df["month"] = df["datetime"].dt.month
+df["is_weekend"] = (df["dow"] >= 5).astype(int)
 
 # Cyclical encoding for hour and month
-df["hour_sin"]  = np.sin(2 * np.pi * df["hour"]  / 24)
-df["hour_cos"]  = np.cos(2 * np.pi * df["hour"]  / 24)
-df["mon_sin"]   = np.sin(2 * np.pi * df["month"] / 12)
-df["mon_cos"]   = np.cos(2 * np.pi * df["month"] / 12)
+df["hour_sin"] = np.sin(2 * np.pi * df["hour"] / 24)
+df["hour_cos"] = np.cos(2 * np.pi * df["hour"] / 24)
+df["mon_sin"] = np.sin(2 * np.pi * df["month"] / 12)
+df["mon_cos"] = np.cos(2 * np.pi * df["month"] / 12)
 
 # 2) Simple physical composites / interactions
-df["wind_power"] = df.get("wind_speed", 0) * df.get("wind_speed", 0)     # ∝ kinetic energy
-df["humid_cloud"] = df.get("humidity", 0) * df.get("clouds", 0) / 100.0  # saturated/cloudy combo
-df["press_anom"]  = df.get("pressure", df["pressure"].median()) - df["pressure"].median()  # deviation from median
+df["wind_power"] = df.get("wind_speed", 0) * df.get("wind_speed", 0)  # ∝ kinetic energy
+df["humid_cloud"] = (
+    df.get("humidity", 0) * df.get("clouds", 0) / 100.0
+)  # saturated/cloudy combo
+df["press_anom"] = (
+    df.get("pressure", df["pressure"].median()) - df["pressure"].median()
+)  # deviation from median
 
 # 3) Short-term dynamics (rolling / lag features) per city
 df = df.sort_values(["city", "datetime"]).reset_index(drop=True)
 
 # One-step lag (previous 3h) per city
-for col in ["temp","humidity","pressure","wind_speed","clouds","pop","rain_3h","snow_3h"]:
+for col in [
+    "temp",
+    "humidity",
+    "pressure",
+    "wind_speed",
+    "clouds",
+    "pop",
+    "rain_3h",
+    "snow_3h",
+]:
     if col in df.columns:
         df[f"{col}_lag1"] = df.groupby("city")[col].shift(1)
 
 # 6h change (current - value 2 steps before)
-for col in ["temp","humidity","pressure","wind_speed","clouds"]:
+for col in ["temp", "humidity", "pressure", "wind_speed", "clouds"]:
     if col in df.columns:
         df[f"{col}_chg6h"] = df[col] - df.groupby("city")[col].shift(2)
 
 # Rolling means (last 6h window = 3*2=6h)
-for col in ["temp","humidity","pressure","wind_speed","clouds","pop"]:
+for col in ["temp", "humidity", "pressure", "wind_speed", "clouds", "pop"]:
     if col in df.columns:
         df[f"{col}_roll6h"] = (
             df.groupby("city")[col]
-              .rolling(window=2, min_periods=1).mean()
-              .reset_index(level=0, drop=True)
+            .rolling(window=2, min_periods=1)
+            .mean()
+            .reset_index(level=0, drop=True)
         )
 
 # 4) Recent precipitation signal
-if {"rain_3h","snow_3h"}.issubset(df.columns):
+if {"rain_3h", "snow_3h"}.issubset(df.columns):
     df["precip_3h"] = df["rain_3h"].fillna(0) + df["snow_3h"].fillna(0)
     # Was there precipitation in the previous 3h?
-    df["precip_prev"] = (
-        df.groupby("city")["precip_3h"].shift(1).fillna(0) > 0
-    ).astype(int)
+    df["precip_prev"] = (df.groupby("city")["precip_3h"].shift(1).fillna(0) > 0).astype(
+        int
+    )
+
 
 # 5) Season (rough)
 def season_from_month(m):
     # DJF=Winter, MAM=Spring, JJA=Summer, SON=Autumn
     return (
-        "Winter" if m in [12,1,2] else
-        "Spring" if m in [3,4,5] else
-        "Summer" if m in [6,7,8] else
-        "Autumn"
+        "Winter"
+        if m in [12, 1, 2]
+        else "Spring" if m in [3, 4, 5] else "Summer" if m in [6, 7, 8] else "Autumn"
     )
+
+
 df["season"] = df["month"].apply(season_from_month)
 
 print("Feature engineering done. Shape:", df.shape)
@@ -355,7 +425,10 @@ top_features = corr.drop("RainOrNot").abs().sort_values(ascending=False).head(15
 plt.figure(figsize=(10, 6))
 sns.heatmap(
     corr_df[top_features.tolist() + ["RainOrNot"]].corr(),
-    cmap="coolwarm", annot=True, fmt=".2f", cbar=True
+    cmap="coolwarm",
+    annot=True,
+    fmt=".2f",
+    cbar=True,
 )
 plt.title("Top 15 Correlated Features with RainOrNot")
 plt.tight_layout()
@@ -371,17 +444,29 @@ from sklearn.model_selection import GroupShuffleSplit
 from sklearn.compose import ColumnTransformer
 from sklearn.pipeline import Pipeline
 from sklearn.impute import SimpleImputer
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
+from sklearn.metrics import (
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    confusion_matrix,
+)
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.svm import SVC
 from sklearn.linear_model import SGDClassifier
 import matplotlib.pyplot as plt, seaborn as sns
-import warnings; warnings.filterwarnings("ignore")
+import warnings
+
+warnings.filterwarnings("ignore")
 
 # 1) Target & no-leak dataset
 TARGET = "RainOrNot"
-assert {"city","datetime",TARGET}.issubset(df.columns)
-leaks = [c for c in ["rain_3h","snow_3h","pop","precip_prev","weather_main"] if c in df.columns]
+assert {"city", "datetime", TARGET}.issubset(df.columns)
+leaks = [
+    c
+    for c in ["rain_3h", "snow_3h", "pop", "precip_prev", "weather_main"]
+    if c in df.columns
+]
 X_all = df.drop(columns=[TARGET] + leaks, errors="ignore").copy()
 y_all = df[TARGET].astype(int).copy()
 
@@ -398,21 +483,19 @@ y_train, y_test = y_all.iloc[tr_idx].copy(), y_all.iloc[te_idx].copy()
 for X_ in (X_train, X_test):
     X_.drop(columns=["datetime"], inplace=True, errors="ignore")
 
-cat_cols = [c for c in ["city","season"] if c in X_train.columns]
+cat_cols = [c for c in ["city", "season"] if c in X_train.columns]
 num_cols = [c for c in X_train.columns if c not in cat_cols]
 
-num_pipe = Pipeline([
-    ("imp", SimpleImputer(strategy="median")),
-    ("sc", StandardScaler())
-])
-cat_pipe = Pipeline([
-    ("imp", SimpleImputer(strategy="most_frequent")),
-    ("oh", OneHotEncoder(handle_unknown="ignore", sparse_output=False))
-])
-preproc = ColumnTransformer([
-    ("num", num_pipe, num_cols),
-    ("cat", cat_pipe, cat_cols)
-])
+num_pipe = Pipeline(
+    [("imp", SimpleImputer(strategy="median")), ("sc", StandardScaler())]
+)
+cat_pipe = Pipeline(
+    [
+        ("imp", SimpleImputer(strategy="most_frequent")),
+        ("oh", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
+    ]
+)
+preproc = ColumnTransformer([("num", num_pipe, num_cols), ("cat", cat_pipe, cat_cols)])
 
 # 4) Class weight balancing
 neg, pos = np.bincount(y_train)
@@ -420,25 +503,53 @@ pos_w = (neg / max(1, pos)) if pos > 0 else 1.0
 
 # 5) Models
 models = {
-    "Decision Tree": Pipeline([
-        ("prep", preproc),
-        ("clf", DecisionTreeClassifier(
-            max_depth=4, min_samples_split=30, min_samples_leaf=38,
-            class_weight="balanced", random_state=42))
-    ]),
-      "Lasso (SGDClassifier)": Pipeline([
-        ("prep", preproc),
-        ("clf", SGDClassifier(
-            loss="log_loss", penalty="l1", alpha=0.001,
-            class_weight="balanced", max_iter=1000, random_state=42))
-    ]),
-    "SVM": Pipeline([
-        ("prep", preproc),
-        ("clf", SVC(
-            kernel="rbf", C=1.5, gamma="scale",
-            class_weight="balanced", probability=False,
-            random_state=42))
-    ])
+    "Decision Tree": Pipeline(
+        [
+            ("prep", preproc),
+            (
+                "clf",
+                DecisionTreeClassifier(
+                    max_depth=4,
+                    min_samples_split=30,
+                    min_samples_leaf=38,
+                    class_weight="balanced",
+                    random_state=42,
+                ),
+            ),
+        ]
+    ),
+    "Lasso (SGDClassifier)": Pipeline(
+        [
+            ("prep", preproc),
+            (
+                "clf",
+                SGDClassifier(
+                    loss="log_loss",
+                    penalty="l1",
+                    alpha=0.001,
+                    class_weight="balanced",
+                    max_iter=1000,
+                    random_state=42,
+                ),
+            ),
+        ]
+    ),
+    "SVM": Pipeline(
+        [
+            ("prep", preproc),
+            (
+                "clf",
+                SVC(
+                    kernel="rbf",
+                    C=1.5,
+                    gamma="scale",
+                    class_weight="balanced",
+                    probability=False,
+                    random_state=42,
+                ),
+            ),
+        ]
+    ),
 }
 
 # 6) Train & evaluate
@@ -446,13 +557,15 @@ rows = []
 for name, pipe in models.items():
     pipe.fit(X_train, y_train)
     y_pred = pipe.predict(X_test)
-    rows.append({
-        "Model": name,
-        "Accuracy":  accuracy_score(y_test, y_pred),
-        "Precision": precision_score(y_test, y_pred, zero_division=0),
-        "Recall":    recall_score(y_test, y_pred, zero_division=0),
-        "F1":        f1_score(y_test, y_pred, zero_division=0)
-    })
+    rows.append(
+        {
+            "Model": name,
+            "Accuracy": accuracy_score(y_test, y_pred),
+            "Precision": precision_score(y_test, y_pred, zero_division=0),
+            "Recall": recall_score(y_test, y_pred, zero_division=0),
+            "F1": f1_score(y_test, y_pred, zero_division=0),
+        }
+    )
 
 results = pd.DataFrame(rows).sort_values("F1", ascending=False).reset_index(drop=True)
 print("\n=== Model Comparison (DT, XGB, SVM) ===")
@@ -464,10 +577,13 @@ best_model = models[best_name]
 y_pred_best = best_model.predict(X_test)
 cm = confusion_matrix(y_test, y_pred_best)
 
-plt.figure(figsize=(5,4))
+plt.figure(figsize=(5, 4))
 sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", cbar=False)
 plt.title(f"Confusion Matrix — {best_name}")
-plt.xlabel("Predicted"); plt.ylabel("Actual"); plt.tight_layout(); plt.show()
+plt.xlabel("Predicted")
+plt.ylabel("Actual")
+plt.tight_layout()
+plt.show()
 
 # === Decision Tree visuals ===
 from sklearn import tree
@@ -479,7 +595,7 @@ dt_pipe = models["Decision Tree"]
 dt_pipe.fit(X_train, y_train)
 
 prep = dt_pipe.named_steps["prep"]
-clf  = dt_pipe.named_steps["clf"]
+clf = dt_pipe.named_steps["clf"]
 
 feat_names = prep.get_feature_names_out()
 
@@ -488,8 +604,11 @@ tree.plot_tree(
     clf,
     feature_names=feat_names,
     class_names=["NoRain", "Rain"],
-    filled=True, rounded=True, impurity=True, fontsize=8,
-    max_depth=3
+    filled=True,
+    rounded=True,
+    impurity=True,
+    fontsize=8,
+    max_depth=3,
 )
 plt.title("Decision Tree — top levels")
 plt.show()
@@ -497,28 +616,39 @@ plt.show()
 from sklearn.model_selection import GroupKFold, GridSearchCV
 from sklearn.linear_model import SGDClassifier
 
-dt_all = pd.to_datetime(df.loc[X_train.index.union(X_test.index), "datetime"])  # safety if needed
-groups_all = df.loc[X_all.index, "city"].astype(str) + "_" + pd.to_datetime(df.loc[X_all.index, "datetime"]).dt.date.astype(str)
+dt_all = pd.to_datetime(
+    df.loc[X_train.index.union(X_test.index), "datetime"]
+)  # safety if needed
+groups_all = (
+    df.loc[X_all.index, "city"].astype(str)
+    + "_"
+    + pd.to_datetime(df.loc[X_all.index, "datetime"]).dt.date.astype(str)
+)
 groups_train = groups_all.iloc[tr_idx]  # groups aligned with X_train/y_train
 
-sgd_base = Pipeline([
-    ("prep", preproc),
-    ("clf", SGDClassifier(
-        loss="log_loss",
-        penalty="l1",            # will be tuned (l1 vs elasticnet)
-        alpha=1e-3,              # will be tuned
-        l1_ratio=0.5,            # used when penalty='elasticnet', will be tuned
-        class_weight="balanced",
-        max_iter=500,
-        random_state=42
-    ))
-])
+sgd_base = Pipeline(
+    [
+        ("prep", preproc),
+        (
+            "clf",
+            SGDClassifier(
+                loss="log_loss",
+                penalty="l1",  # will be tuned (l1 vs elasticnet)
+                alpha=1e-3,  # will be tuned
+                l1_ratio=0.5,  # used when penalty='elasticnet', will be tuned
+                class_weight="balanced",
+                max_iter=500,
+                random_state=42,
+            ),
+        ),
+    ]
+)
 
 # 2) Grid of hyperparameters
 param_grid = {
     "clf__penalty": ["l1", "elasticnet"],
     "clf__alpha": [1e-4, 3e-4, 1e-3, 3e-3, 1e-2],
-    "clf__l1_ratio": [0.2, 0.5, 0.8]  # only matters when penalty='elasticnet'
+    "clf__l1_ratio": [0.2, 0.5, 0.8],  # only matters when penalty='elasticnet'
 }
 
 # 3) Group-aware CV (no temporal leakage)
@@ -532,7 +662,7 @@ gs = GridSearchCV(
     cv=gkf.split(X_train, y_train, groups=groups_train),
     n_jobs=-1,
     refit=True,
-    verbose=1
+    verbose=1,
 )
 
 # 5) Run search
@@ -544,7 +674,15 @@ print("Best CV F1:", round(gs.best_score_, 4))
 # 6) Keep tuned model for the next steps
 best_lasso = gs.best_estimator_
 
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, precision_score, recall_score, f1_score
+from sklearn.metrics import (
+    classification_report,
+    confusion_matrix,
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+)
+
 # Evaluate the tuned (best) model on the test set
 y_pred_tuned = best_lasso.predict(X_test)
 
@@ -563,18 +701,18 @@ print(classification_report(y_test, y_pred_tuned, digits=3))
 
 # Confusion Matrix Visualization
 cm = confusion_matrix(y_test, y_pred_tuned)
-plt.figure(figsize=(5,4))
+plt.figure(figsize=(5, 4))
 sns.heatmap(cm, annot=True, fmt="d", cmap="Purples", cbar=False)
 plt.title("Confusion Matrix — Tuned Lasso (SGDClassifier)")
-plt.xlabel("Predicted"); plt.ylabel("Actual"); plt.tight_layout()
+plt.xlabel("Predicted")
+plt.ylabel("Actual")
+plt.tight_layout()
 plt.show()
 
 y_pred_tuned = best_lasso.predict(X_test)
-results = pd.DataFrame({
-    "city": df.loc[X_test.index, "city"],
-    "actual": y_test,
-    "predicted": y_pred_tuned
-})
+results = pd.DataFrame(
+    {"city": df.loc[X_test.index, "city"], "actual": y_test, "predicted": y_pred_tuned}
+)
 
 print(results.tail(5))
 
@@ -587,35 +725,49 @@ from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.impute import SimpleImputer
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
+from sklearn.metrics import (
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    confusion_matrix,
+)
 import matplotlib.pyplot as plt, seaborn as sns
 import numpy as np, pandas as pd
 
 cat_cols = [c for c in ["city", "season"] if c in X_train.columns]
 num_cols = [c for c in X_train.columns if c not in cat_cols]
 
-num_pipe = Pipeline([
-    ("imp", SimpleImputer(strategy="median")),
-    ("sc", StandardScaler())
-])
-cat_pipe = Pipeline([
-    ("imp", SimpleImputer(strategy="most_frequent")),
-    ("oh", OneHotEncoder(handle_unknown="ignore", sparse_output=False))
-])
-preproc = ColumnTransformer([
-    ("num", num_pipe, num_cols),
-    ("cat", cat_pipe, cat_cols)
-])
+num_pipe = Pipeline(
+    [("imp", SimpleImputer(strategy="median")), ("sc", StandardScaler())]
+)
+cat_pipe = Pipeline(
+    [
+        ("imp", SimpleImputer(strategy="most_frequent")),
+        ("oh", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
+    ]
+)
+preproc = ColumnTransformer([("num", num_pipe, num_cols), ("cat", cat_pipe, cat_cols)])
 
 neg, pos = np.bincount(y_train)
 pos_w = (neg / max(1, pos)) if pos > 0 else 1.0
 
-rf_pipe = Pipeline([
-    ("prep", preproc),
-    ("clf", RandomForestClassifier(
-        n_estimators=400, max_depth=20, min_samples_split=15,
-        class_weight="balanced", random_state=42, n_jobs=-1))
-])
+rf_pipe = Pipeline(
+    [
+        ("prep", preproc),
+        (
+            "clf",
+            RandomForestClassifier(
+                n_estimators=400,
+                max_depth=20,
+                min_samples_split=15,
+                class_weight="balanced",
+                random_state=42,
+                n_jobs=-1,
+            ),
+        ),
+    ]
+)
 
 rf_pipe.fit(X_train, y_train)
 y_pred = rf_pipe.predict(X_test)
@@ -632,48 +784,60 @@ print(f"Recall   : {rec:.3f}")
 print(f"F1 Score : {f1:.3f}")
 
 cm = confusion_matrix(y_test, y_pred)
-plt.figure(figsize=(5,4))
+plt.figure(figsize=(5, 4))
 sns.heatmap(cm, annot=True, fmt="d", cmap="Blues", cbar=False)
 plt.title("Confusion Matrix — Random Forest")
-plt.xlabel("Predicted"); plt.ylabel("Actual"); plt.tight_layout(); plt.show()
+plt.xlabel("Predicted")
+plt.ylabel("Actual")
+plt.tight_layout()
+plt.show()
 
 from xgboost import XGBClassifier
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.impute import SimpleImputer
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
+from sklearn.metrics import (
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    confusion_matrix,
+)
 import matplotlib.pyplot as plt, seaborn as sns
 import numpy as np, pandas as pd
 
 cat_cols = [c for c in ["city", "season"] if c in X_train.columns]
 num_cols = [c for c in X_train.columns if c not in cat_cols]
 
-num_pipe = Pipeline([
-    ("imp", SimpleImputer(strategy="median")),
-    ("sc", StandardScaler())
-])
-cat_pipe = Pipeline([
-    ("imp", SimpleImputer(strategy="most_frequent")),
-    ("oh", OneHotEncoder(handle_unknown="ignore", sparse_output=False))
-])
-preproc = ColumnTransformer([
-    ("num", num_pipe, num_cols),
-    ("cat", cat_pipe, cat_cols)
-])
+num_pipe = Pipeline(
+    [("imp", SimpleImputer(strategy="median")), ("sc", StandardScaler())]
+)
+cat_pipe = Pipeline(
+    [
+        ("imp", SimpleImputer(strategy="most_frequent")),
+        ("oh", OneHotEncoder(handle_unknown="ignore", sparse_output=False)),
+    ]
+)
+preproc = ColumnTransformer([("num", num_pipe, num_cols), ("cat", cat_pipe, cat_cols)])
 
-xgb_pipe = Pipeline([
-    ("prep", preproc),
-    ("clf", XGBClassifier(
-        n_estimators=400,
-        learning_rate=0.5,
-        max_depth=3,
-        subsample=0.4,
-        colsample_bytree=0.5,
-        random_state=42,
-        scale_pos_weight=(len(y_train) - sum(y_train)) / sum(y_train)
-    ))
-])
+xgb_pipe = Pipeline(
+    [
+        ("prep", preproc),
+        (
+            "clf",
+            XGBClassifier(
+                n_estimators=400,
+                learning_rate=0.5,
+                max_depth=3,
+                subsample=0.4,
+                colsample_bytree=0.5,
+                random_state=42,
+                scale_pos_weight=(len(y_train) - sum(y_train)) / sum(y_train),
+            ),
+        ),
+    ]
+)
 
 xgb_pipe.fit(X_train, y_train)
 y_pred = xgb_pipe.predict(X_test)
@@ -685,39 +849,37 @@ print(f"Recall   : {recall_score(y_test, y_pred, zero_division=0):.3f}")
 print(f"F1 Score : {f1_score(y_test, y_pred, zero_division=0):.3f}")
 
 cm = confusion_matrix(y_test, y_pred)
-plt.figure(figsize=(5,4))
+plt.figure(figsize=(5, 4))
 sns.heatmap(cm, annot=True, fmt="d", cmap="Greens", cbar=False)
 plt.title("Confusion Matrix — XGBoost")
-plt.xlabel("Predicted"); plt.ylabel("Actual"); plt.tight_layout(); plt.show()
+plt.xlabel("Predicted")
+plt.ylabel("Actual")
+plt.tight_layout()
+plt.show()
 
 import pandas as pd
 import seaborn as sns
 import matplotlib.pyplot as plt
 
-cols = ['city', 'temp', 'humidity', 'RainOrNot']
+cols = ["city", "temp", "humidity", "RainOrNot"]
 data = df[cols].copy()
 
 print("Колонки в выборке:", data.columns.tolist())
 
 sns.scatterplot(
-    data=data,
-    x='temp',
-    y='humidity',
-    hue='RainOrNot',
-    palette='coolwarm',
-    alpha=0.7
+    data=data, x="temp", y="humidity", hue="RainOrNot", palette="coolwarm", alpha=0.7
 )
-plt.title('Temp vs Humidity — метка дождя')
-plt.xlabel('Temp (°C)')
-plt.ylabel('Humidity (%)')
+plt.title("Temp vs Humidity — метка дождя")
+plt.xlabel("Temp (°C)")
+plt.ylabel("Humidity (%)")
 plt.show()
 
 from sklearn.model_selection import train_test_split
 from sklearn import preprocessing
 import pandas as pd
 
-features = ['temp', 'humidity']
-target = 'RainOrNot'
+features = ["temp", "humidity"]
+target = "RainOrNot"
 
 X = df[features]
 y = df[target]
@@ -739,32 +901,22 @@ import seaborn as sns
 import matplotlib.pyplot as plt
 import pandas as pd
 
-kmeans = KMeans(n_clusters=3, random_state=0, n_init='auto')
+kmeans = KMeans(n_clusters=3, random_state=0, n_init="auto")
 kmeans.fit(X_train_norm)
 
 clustered = pd.DataFrame(X_train.copy())
-clustered['Cluster'] = kmeans.labels_
-clustered['RainOrNot'] = y_train.values
+clustered["Cluster"] = kmeans.labels_
+clustered["RainOrNot"] = y_train.values
 
 sns.scatterplot(
-    data=clustered,
-    x='temp',
-    y='humidity',
-    hue='Cluster',
-    palette='viridis',
-    alpha=0.8
+    data=clustered, x="temp", y="humidity", hue="Cluster", palette="viridis", alpha=0.8
 )
 plt.title("K-Means Clustering по temp и humidity")
 plt.xlabel("Температура (°C)")
 plt.ylabel("Влажность (%)")
 plt.show()
 
-sns.boxplot(
-    data=clustered,
-    x='Cluster',
-    y='humidity',
-    palette='viridis'
-)
+sns.boxplot(data=clustered, x="Cluster", y="humidity", palette="viridis")
 plt.title("Распределение влажности по кластерам")
 plt.xlabel("Кластер")
 plt.ylabel("Влажность (%)")
@@ -781,8 +933,8 @@ K = range(2, 8)
 sil_scores = []
 
 for k in K:
-    model = KMeans(n_clusters=k, random_state=0, n_init='auto').fit(X_data)
-    sil = silhouette_score(X_data, model.labels_, metric='euclidean')
+    model = KMeans(n_clusters=k, random_state=0, n_init="auto").fit(X_data)
+    sil = silhouette_score(X_data, model.labels_, metric="euclidean")
     sil_scores.append(sil)
 
 plt.figure(figsize=(7, 5))
@@ -801,15 +953,14 @@ K = range(1, 20)
 wss = []
 
 for k in K:
-    kmeans = KMeans(n_clusters=k, init="k-means++", random_state=0, n_init='auto')
+    kmeans = KMeans(n_clusters=k, init="k-means++", random_state=0, n_init="auto")
     kmeans.fit(X_data)
     wss.append(kmeans.inertia_)
 
 plt.figure(figsize=(7, 5))
-plt.plot(K, wss, marker='o')
+plt.plot(K, wss, marker="o")
 plt.title("Elbow Method — поиск оптимального числа кластеров")
 plt.xlabel("Количество кластеров (k)")
 plt.ylabel("WSS (сумма квадратов расстояний внутри кластеров)")
 plt.grid(True)
 plt.show()
-

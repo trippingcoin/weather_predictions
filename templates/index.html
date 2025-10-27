@@ -1,133 +1,279 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
   <meta charset="UTF-8">
-  <title>Rain Prediction System</title>
+  <title>Weather Rain Prediction</title>
   <style>
     body {
-      font-family: Arial, sans-serif;
-      background: #f5f7fa;
+      font-family: 'Poppins', sans-serif;
+      background: linear-gradient(135deg, #74b9ff, #dfe6e9);
+      height: 100vh;
       display: flex;
       justify-content: center;
       align-items: center;
-      height: 100vh;
+      margin: 0;
     }
-    .container {
+
+    .card {
       background: white;
-      padding: 25px 35px;
-      border-radius: 15px;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-      max-width: 450px;
-    }
-    h2 {
+      border-radius: 20px;
+      box-shadow: 0 6px 30px rgba(0, 0, 0, 0.2);
+      padding: 35px;
+      width: 420px;
       text-align: center;
+      transition: transform 0.3s ease;
+    }
+
+    .card:hover {
+      transform: translateY(-5px);
+    }
+
+    h2 {
+      color: #0984e3;
       margin-bottom: 20px;
     }
+
     label {
       display: block;
+      font-weight: 600;
+      color: #2d3436;
       margin-top: 10px;
-      font-weight: bold;
+      text-align: left;
     }
-    input, select {
+
+    select,
+    input {
       width: 100%;
-      padding: 8px;
-      margin-top: 5px;
-      border: 1px solid #ccc;
-      border-radius: 5px;
-    }
-    button {
-      margin-top: 20px;
-      width: 100%;
-      background: #007bff;
-      color: white;
       padding: 10px;
+      margin-top: 5px;
+      border: 1px solid #b2bec3;
+      border-radius: 6px;
+      font-size: 15px;
+      outline: none;
+      transition: all 0.2s;
+    }
+
+    select:focus,
+    input:focus {
+      border-color: #0984e3;
+      box-shadow: 0 0 5px rgba(9, 132, 227, 0.4);
+    }
+
+    button {
+      width: 100%;
+      background: linear-gradient(90deg, #0984e3, #00cec9);
+      color: white;
       border: none;
-      border-radius: 5px;
-      cursor: pointer;
+      border-radius: 8px;
       font-size: 16px;
+      font-weight: 600;
+      padding: 12px;
+      margin-top: 25px;
+      cursor: pointer;
+      transition: all 0.3s;
     }
+
     button:hover {
-      background: #0056b3;
+      background: linear-gradient(90deg, #00cec9, #0984e3);
+      transform: scale(1.02);
     }
-    #result {
-      text-align: center;
+
+    .result {
+      margin-top: 30px;
+      padding: 15px;
+      border-radius: 10px;
+      background: #f1f2f6;
+      font-size: 17px;
+      line-height: 1.5em;
+      color: #2d3436;
+    }
+
+    .loading {
+      font-style: italic;
+      color: #636e72;
       margin-top: 20px;
-      font-size: 18px;
+    }
+
+    .rain {
+      color: #0984e3;
       font-weight: bold;
+    }
+
+    .sun {
+      color: #00b894;
+      font-weight: bold;
+    }
+
+    footer {
+      position: fixed;
+      bottom: 10px;
+      font-size: 13px;
+      color: #636e72;
     }
   </style>
 </head>
+
 <body>
-  <div class="container">
-    <h2>🌦 Rain Prediction</h2>
 
-    <label for="city">Select City:</label>
+  <div class="card">
+    <h2>Rain Prediction System</h2>
+
+    <label for="city">Select City</label>
     <select id="city">
-      <option value="Astana">Astana</option>
-      <option value="Almaty">Almaty</option>
-      <option value="Shymkent">Shymkent</option>
-      <option value="Karaganda">Karaganda</option>
+      <optgroup label="Kazakhstan Cities">
+        <option>Astana</option>
+        <option>Almaty</option>
+        <option>Shymkent</option>
+        <option>Akmola (Kokshetau)</option>
+        <option>Atyrau</option>
+        <option>Aktobe</option>
+        <option>Abai (Semey)</option>
+        <option>Ulytau (Zhezqazghan)</option>
+        <option>Jetisu (Taldykorgan)</option>
+        <option>Oskemen</option>
+        <option>Karaganda</option>
+        <option>Kostanay</option>
+        <option>Kyzylorda</option>
+        <option>Mangystau (Aktau)</option>
+        <option>Petropavl</option>
+        <option>Pavlodar</option>
+        <option>Turkistan</option>
+        <option>Oral</option>
+
+      <optgroup label="Europe Capitals">
+        <option>Vienna (Austria)</option>
+        <option>Brussels (Belgium)</option>
+        <option>Sofia (Bulgaria)</option>
+        <option>Zagreb (Croatia)</option>
+        <option>Prague (Czech Republic)</option>
+        <option>Copenhagen (Denmark)</option>
+        <option>Tallinn (Estonia)</option>
+        <option>Helsinki (Finland)</option>
+        <option>Paris (France)</option>
+        <option>Berlin (Germany)</option>
+        <option>Athens (Greece)</option>
+        <option>Budapest (Hungary)</option>
+        <option>Reykjavik (Iceland)</option>
+        <option>Dublin (Ireland)</option>
+        <option>Rome (Italy)</option>
+        <option>Riga (Latvia)</option>
+        <option>Vilnius (Lithuania)</option>
+        <option>Luxembourg (Luxembourg)</option>
+        <option>Valletta (Malta)</option>
+        <option>Chisinau (Moldova)</option>
+        <option>Monaco (Monaco)</option>
+        <option>Podgorica (Montenegro)</option>
+        <option>Amsterdam (Netherlands)</option>
+        <option>Skopje (North Macedonia)</option>
+        <option>Oslo (Norway)</option>
+        <option>Warsaw (Poland)</option>
+        <option>Lisbon (Portugal)</option>
+        <option>Bucharest (Romania)</option>
+        <option>Belgrade (Serbia)</option>
+        <option>Bratislava (Slovakia)</option>
+        <option>Ljubljana (Slovenia)</option>
+        <option>Madrid (Spain)</option>
+        <option>Stockholm (Sweden)</option>
+        <option>Bern (Switzerland)</option>
+        <option>Kyiv (Ukraine)</option>
+        <option>London (United Kingdom)</option>
+      </optgroup>
     </select>
 
-    <label for="temperature">Temperature (°C):</label>
-    <input type="number" id="temperature" step="0.1" placeholder="e.g. 10">
+    <label for="hours">Forecast Hours Ahead</label>
+    <input type="number" id="hours" value="3" min="0" step="1">
 
-    <label for="humidity">Humidity (%):</label>
-    <input type="number" id="humidity" placeholder="e.g. 70">
-
-    <label for="pressure">Pressure (hPa):</label>
-    <input type="number" id="pressure" placeholder="e.g. 1015">
-
-    <label for="wind_speed">Wind Speed (m/s):</label>
-    <input type="number" id="wind_speed" step="0.1" placeholder="e.g. 3.5">
-
-    <label for="hours_ahead">Forecast Hours Ahead:</label>
-    <input type="number" id="hours_ahead" placeholder="e.g. 6">
-
-    <label for="model">Select Model:</label>
+    <label for="model">Machine Learning Model</label>
     <select id="model">
-      <option value="Random Forest">Random Forest</option>
-      <option value="Gradient Boosting">Gradient Boosting</option>
-      <option value="Logistic Regression">Logistic Regression</option>
+      <optgroup label="Tree-Based Models">
+        <option>Decision Tree</option>
+        <option>Random Forest</option>
+        <option>Gradient Boosting</option>
+        <option>XGBoost Classifier</option>
+      </optgroup>
+
+      <optgroup label="Linear Models">
+        <option>Logistic Regression</option>
+        <option>Lasso (SGDClassifier)</option>
+      </optgroup>
+
+      <optgroup label="⚙️ Kernel Methods">
+        <option>SVM (RBF)</option>
+      </optgroup>
+
+      <optgroup label="Other / Default">
+        <option>Auto (Best Model)</option>
+      </optgroup>
     </select>
 
-    <button id="predict">Predict Rain</button>
+    <button onclick="predict()">Predict Rain</button>
 
-    <div id="result"></div>
+    <div id="loading" class="loading" style="display:none;">Loading prediction...</div>
+    <div id="result" class="result"></div>
+    <div id="output" class="result"></div>
+    <div id="accuracy" class="accuracy"></div>
   </div>
 
+  <footer>Made with ❤️ by Torekhan Pugashbek</footer>
+
   <script>
-    document.getElementById("predict").onclick = async () => {
-      const data = {
-        model: document.getElementById("model").value,
-        temperature: parseFloat(document.getElementById("temperature").value),
-        humidity: parseFloat(document.getElementById("humidity").value),
-        pressure: parseFloat(document.getElementById("pressure").value),
-        wind_speed: parseFloat(document.getElementById("wind_speed").value),
-        hours_ahead: parseFloat(document.getElementById("hours_ahead").value),
-        city: document.getElementById("city").value
-      };
+    async function predict() {
+      const city = document.getElementById('city').value;
+      const hours = parseFloat(document.getElementById('hours').value);
+      const model = document.getElementById('model').value;
+      const resultDiv = document.getElementById('result');
+      const loading = document.getElementById('loading');
 
-      const res = await fetch("/train_predict", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data)
-      });
+      resultDiv.innerHTML = '';
+      loading.style.display = 'block';
 
-      const resultDiv = document.getElementById("result");
-      const response = await res.json();
+      try {
+        const res = await fetch("/predict", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ city, hours_ahead: hours, model })
+        });
 
-      if (response.error) {
-        resultDiv.innerText = "Error: " + response.error;
-        resultDiv.style.color = "red";
-      } else {
+        const data = await res.json();
+        const output = document.getElementById("output");
+        const accuracy = document.getElementById("accuracy");
+
+        if (data.error) {
+          output.innerHTML = `<span class="bad">❌ ${data.error}</span>`;
+          accuracy.textContent = "";
+          return;
+        }
+
+        loading.style.display = 'none';
+
+        if (data.error) {
+          resultDiv.innerHTML = `<span style="color:red;">${data.error}</span>`;
+          return;
+        }
+
+        const prob = data.rain_probability;
+        const acc = data.accuracy;
+        const modelName = data.model;
+        const cityName = data.city;
+        const time = data.datetime;
+
+        accuracy.innerHTML = `📊 Model accuracy: <strong>${acc}%</strong>`;
+
         resultDiv.innerHTML = `
-          🌧 Rain Probability: <b>${response.rain_probability}%</b><br>
-          📈 Model Accuracy: <b>${response.accuracy}%</b>
-        `;
-        resultDiv.style.color = "black";
+        <div><b>${cityName}</b><br>
+        Forecast Time: ${time}</div><hr>
+        <div>Rain Probability:
+          <span class="${prob >= 50 ? 'rain' : 'sun'}">${prob}%</span>
+        </div>
+        <div>Model Used: <b>${modelName}</b></div>
+      `;
+      } catch (err) {
+        loading.style.display = 'none';
+        resultDiv.innerHTML = `<span style="color:red;"> Request failed: ${err.message}</span>`;
       }
-    };
+    }
   </script>
 </body>
+
 </html>
