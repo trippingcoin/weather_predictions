@@ -203,7 +203,7 @@
       </optgroup>
 
       <optgroup label="Other / Default">
-        <option>Auto (Best Model)</option>
+        <option value="best">Auto (Best Model)</option>
       </optgroup>
     </select>
 
@@ -236,41 +236,45 @@
         });
 
         const data = await res.json();
-        const output = document.getElementById("output");
-        const accuracy = document.getElementById("accuracy");
-
-        if (data.error) {
-          output.innerHTML = `<span class="bad">❌ ${data.error}</span>`;
-          accuracy.textContent = "";
-          return;
-        }
-
         loading.style.display = 'none';
 
         if (data.error) {
-          resultDiv.innerHTML = `<span style="color:red;">${data.error}</span>`;
+          resultDiv.innerHTML = `<span style="color:red;">❌ ${data.error}</span>`;
           return;
         }
 
         const prob = data.rain_probability;
         const acc = data.accuracy;
-        const modelName = data.model;
         const cityName = data.city;
         const time = data.datetime;
+        const modelName = data.model || "Unknown";
+        const usedModel = data.used_model || modelName;
+        const isBest = data.is_best_model;
 
-        accuracy.innerHTML = `📊 Model accuracy: <strong>${acc}%</strong>`;
+        // ✅ Формат вывода названия модели
+        const modelDisplay = isBest
+          ? `Best Model (${usedModel})`
+          : usedModel;
 
+        // ✅ Вывод результата
         resultDiv.innerHTML = `
         <div><b>${cityName}</b><br>
         Forecast Time: ${time}</div><hr>
         <div>Rain Probability:
           <span class="${prob >= 50 ? 'rain' : 'sun'}">${prob}%</span>
         </div>
-        <div>Model Used: <b>${modelName}</b></div>
+        <div><b>Model Used:</b> ${modelDisplay}</div>
+        <div>📊 Accuracy: <b>${acc}%</b></div>
+        <div><b>Prediction:</b> ${prob >= 60
+            ? "🌧️ High chance of rain!"
+            : prob >= 30
+              ? "🌤️ Possible light rain."
+              : "☀️ Mostly clear."
+          }</div>
       `;
       } catch (err) {
         loading.style.display = 'none';
-        resultDiv.innerHTML = `<span style="color:red;"> Request failed: ${err.message}</span>`;
+        resultDiv.innerHTML = `<span style="color:red;">Request failed: ${err.message}</span>`;
       }
     }
   </script>

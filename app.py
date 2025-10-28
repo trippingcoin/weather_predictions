@@ -314,19 +314,22 @@ def build_preprocessor(X_train):
 # ---------------------------
 def get_model_by_name(name):
     name = name.strip().lower()
+
     if name == "decision tree":
         return DecisionTreeClassifier(
             max_depth=6, class_weight="balanced", random_state=42
         )
+
     if name in ("lasso", "sgd", "lasso (sgdclassifier)"):
         return SGDClassifier(
             loss="log_loss",
             penalty="l1",
-            alpha=1e-3,
+            alpha=0.001,
             class_weight="balanced",
-            max_iter=2000,
+            max_iter=1000,
             random_state=42,
         )
+
     if name in ("svm", "svm (rbf)"):
         return SVC(
             kernel="rbf",
@@ -336,27 +339,34 @@ def get_model_by_name(name):
             probability=True,
             random_state=42,
         )
+
     if name in ("random forest", "random_forest"):
         return RandomForestClassifier(
-            n_estimators=200,
-            max_depth=12,
+            n_estimators=400,
+            max_depth=20,
+            min_samples_split=15,
             class_weight="balanced",
             random_state=42,
             n_jobs=-1,
         )
+
     if name in ("xgboost", "xgb", "xgboost classifier") and _xgb_available:
         return XGBClassifier(
-            n_estimators=300,
-            learning_rate=0.1,
-            max_depth=4,
-            use_label_encoder=False,
-            eval_metric="logloss",
+            n_estimators=400,
+            learning_rate=0.5,
+            max_depth=3,
+            subsample=0.4,
+            colsample_bytree=0.5,
             random_state=42,
+            eval_metric="logloss",
+            use_label_encoder=False,
         )
+
     if name in ("gradient boosting", "gradient_boosting"):
         return GradientBoostingClassifier(
             n_estimators=200, learning_rate=0.1, max_depth=4, random_state=42
         )
+
     # fallback
     return LogisticRegression(max_iter=1000)
 
@@ -443,15 +453,32 @@ def index():
 @app.route("/predict", methods=["POST"])
 def predict_api():
     """
-    Simpler endpoint: accepts {"city": "...", "hours_ahead": 3, "model": "Random Forest"}
-    -> fetches forecast from OpenWeather, builds user row, runs model and returns rain_probability.
+    Endpoint: accepts {"city": "...", "hours_ahead": 3, "model": "best" or "Random Forest"}
+    -> fetches forecast, runs model, returns rain_probability + accuracy.
+    If model='best', selects model with highest cached accuracy.
     """
     req = request.get_json(force=True)
     city = req.get("city")
     hours = float(req.get("hours_ahead", 3))
-    model_name = req.get("model", "Random Forest")
 
-    # resolve city -> coordinate list defined in CITY_QUERIES (fallback to given city)
+    model_name = str(req.get("model", "Random Forest")).strip()
+    if model_name.lower() in ("best", "auto", "auto (best model)"):
+        # выбираем лучшую модель
+        if models_cache:
+            best_model_key = max(
+                models_cache.items(), key=lambda kv: kv[1]["metrics"].get("accuracy", 0)
+            )[0]
+            used_model_name = (
+                best_model_key  # имя модели из keys (подкорректируй формат)
+            )
+        else:
+            # если кэша нет — обучаем всех кандидатов и выбираем (см. ниже)
+            used_model_name = "Random Forest"
+        model_name = "Best Model"
+    else:
+        used_model_name = model_name
+
+    # --- геокодирование ---
     qlist = CITY_QUERIES.get(city, [f"{city},KZ"])
     geo = geocode_best(qlist)
     if not geo:
@@ -462,14 +489,13 @@ def predict_api():
     if not data or "list" not in data:
         return jsonify({"error": f"No forecast available for {city}"}), 400
 
-    # find nearest forecast entry to target time
+    # --- выбираем ближайший прогноз ---
     target = pd.Timestamp.now() + pd.to_timedelta(hours, unit="h")
     fl = pd.DataFrame(data["list"])
     fl["datetime"] = pd.to_datetime(fl["dt_txt"])
     idx = (fl["datetime"] - target).abs().argsort()[0]
     nearest = fl.iloc[idx]
 
-    # build single record
     rec = {
         "city": city,
         "datetime": nearest["dt_txt"],
@@ -483,22 +509,21 @@ def predict_api():
             nearest["weather"][0]["main"] if nearest.get("weather") else None
         ),
     }
-    # prepare user row (use same prepare_df_for_model you have)
+
     df_user = pd.DataFrame([rec])
     X_user, _, _ = prepare_df_for_model(df_user)
 
-    # ensure model trained & cached (train_and_cache from your app)
     try:
-        model_info, _ = train_and_cache(model_name, X_all, y_all)
+        model_info, _ = train_and_cache(used_model_name, X_all, y_all)
     except Exception as e:
         return jsonify({"error": f"Training failed: {e}"}), 500
 
     pipe = model_info["pipeline"]
+
     try:
         if hasattr(pipe, "predict_proba"):
             prob = float(pipe.predict_proba(X_user)[0][1])
         else:
-            # fallback to predict
             pred = pipe.predict(X_user)[0]
             prob = float(pred)
     except Exception as e:
@@ -510,6 +535,8 @@ def predict_api():
     return jsonify(
         {
             "model": model_name,
+            "used_model": used_model_name,
+            "is_best_model": model_name.lower().startswith("best"),
             "city": city,
             "datetime": rec["datetime"],
             "rain_probability": round(prob * 100, 2),
