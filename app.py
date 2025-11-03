@@ -32,6 +32,7 @@ from dotenv import load_dotenv
 from sklearn.model_selection import StratifiedKFold, cross_val_score
 from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline as ImbPipeline
+from sklearn.ensemble import StackingClassifier
 
 
 warnings.filterwarnings("ignore")
@@ -133,6 +134,8 @@ MODEL_FEATURES = [
     "is_weekend",
     "season",
     "city",
+    "temp_prev",
+    "humidity_prev",
 ]
 
 CITY_QUERIES.update(EUROPE_CAPITALS)
@@ -374,10 +377,10 @@ def get_model_by_name(name):
 
     if name in ("random forest", "random_forest"):
         return RandomForestClassifier(
-            n_estimators=800,
-            max_depth=None,
-            min_samples_split=4,
-            min_samples_leaf=2,
+            n_estimators=400,
+            max_depth=14,
+            min_samples_split=6,
+            min_samples_leaf=4,
             max_features="sqrt",
             bootstrap=True,
             class_weight="balanced_subsample",
@@ -399,9 +402,9 @@ def get_model_by_name(name):
 
     if name in ("bagging", "bagging classifier"):
         return BaggingClassifier(
-            n_estimators=200,
-            max_samples=0.8,
-            max_features=0.8,
+            n_estimators=150,
+            max_samples=0.7,
+            max_features=0.7,
             random_state=42,
             n_jobs=-1,
         )
@@ -417,28 +420,32 @@ def get_model_by_name(name):
         return GradientBoostingClassifier(
             n_estimators=400,
             learning_rate=0.05,
-            max_depth=5,
+            max_depth=4,
             subsample=0.9,
+            min_samples_leaf=4,
             random_state=42,
         )
 
     if name in ("hist gradient boosting", "histgradientboosting"):
         return HistGradientBoostingClassifier(
-            max_depth=10,
+            max_depth=8,
             learning_rate=0.05,
-            max_iter=400,
-            l2_regularization=1.0,
+            max_iter=300,
+            l2_regularization=2.0,
+            min_samples_leaf=5,
             random_state=42,
         )
 
     if name in ("xgboost", "xgb", "xgboost classifier") and _xgb_available:
         return XGBClassifier(
-            n_estimators=800,
+            n_estimators=600,
             learning_rate=0.05,
-            max_depth=8,
+            max_depth=6,
             subsample=0.8,
-            colsample_bytree=0.8,
-            reg_lambda=1.2,
+            colsample_bytree=0.7,
+            reg_lambda=3.0,  
+            reg_alpha=1.0,  
+            gamma=0.2,
             random_state=42,
             eval_metric="logloss",
             use_label_encoder=False,
@@ -446,7 +453,10 @@ def get_model_by_name(name):
 
     if name in ("knn", "k-nearest neighbors"):
         return KNeighborsClassifier(
-            n_neighbors=8, weights="distance", metric="manhattan", n_jobs=-1
+            n_neighbors=10,
+            weights="distance",
+            metric="manhattan",
+            n_jobs=-1,
         )
 
     if name in ("naive bayes", "gaussian nb"):
@@ -467,6 +477,25 @@ def get_model_by_name(name):
             batch_size=32,
             verbose=0,
         )
+    
+    if name in ("stacking", "stacking ensemble"):
+        estimators = [
+            ("rf", get_model_by_name("Random Forest")),
+            ("gb", get_model_by_name("Gradient Boosting")),
+            ("xgb", get_model_by_name("XGBoost")),
+        ]
+        final_estimator = LogisticRegression(
+            max_iter=2000,
+            penalty="l2",
+            C=0.5,
+            random_state=42,
+        )
+        return StackingClassifier(
+            estimators=estimators,
+            final_estimator=final_estimator,
+            n_jobs=-1,
+            passthrough=False,
+        )
 
     return LogisticRegression(max_iter=1000, class_weight="balanced", random_state=42)
 
@@ -479,9 +508,11 @@ def train_and_cache(model_name, X_all, y_all):
     preproc, num_cols, cat_cols = build_preprocessor(X_all)
     model = get_model_by_name(model_name)
 
-    pipe = ImbPipeline(
-        [("pre", preproc), ("smote", SMOTE(random_state=42)), ("clf", model)]
-    )
+    pipe = ImbPipeline([    
+        ("pre", preproc),
+        ("smote", SMOTE(random_state=42, sampling_strategy=0.6)),
+        ("clf", model),
+    ])
 
     X_train, X_test, y_train, y_test = train_test_split(
         X_all, y_all, test_size=0.2, random_state=42, stratify=y_all
@@ -579,6 +610,8 @@ else:
     df_raw = build_weather_dataset()
 
 X_all, y_all, df_prepared = prepare_df_for_model(df_raw)
+df_raw["temp_prev"] = df_raw["temp"].shift(1).fillna(df_raw["temp"].median())
+df_raw["humidity_prev"] = df_raw["humidity"].shift(1).fillna(df_raw["humidity"].median())
 
 AVAILABLE_MODELS = [
     "Decision Tree",
@@ -598,6 +631,7 @@ AVAILABLE_MODELS = [
     "Perceptron",
     "Passive Aggressive",
     "Ensemble Blending",
+    "Stacking Ensemble",
 ]
 if _xgb_available:
     AVAILABLE_MODELS.insert(4, "XGBoost")
