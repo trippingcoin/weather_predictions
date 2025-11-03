@@ -24,6 +24,7 @@ from sklearn.ensemble import (
 )
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout, BatchNormalization
+from dotenv import load_dotenv
 
 
 warnings.filterwarnings("ignore")
@@ -37,8 +38,13 @@ try:
 except Exception:
     _xgb_available = False
 
+load_dotenv()
 
-API_KEY = "cd59f6e78b8ec3e0d4b69f9e55d80e1c"
+API_KEY = os.getenv("API_KEY")
+if not API_KEY:
+    raise ValueError("Missing API_KEY. Please set it in your .env file.")
+
+# API_KEY = "cd59f6e78b8ec3e0d4b69f9e55d80e1c"
 DATA_FILE = "weather_data.csv"
 
 CITY_QUERIES = {
