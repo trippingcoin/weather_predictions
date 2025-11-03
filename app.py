@@ -15,7 +15,11 @@ from sklearn.svm import SVC
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.naive_bayes import GaussianNB
-from sklearn.linear_model import RidgeClassifier, Perceptron, PassiveAggressiveClassifier
+from sklearn.linear_model import (
+    RidgeClassifier,
+    Perceptron,
+    PassiveAggressiveClassifier,
+)
 from sklearn.ensemble import (
     AdaBoostClassifier,
     ExtraTreesClassifier,
@@ -25,6 +29,9 @@ from sklearn.ensemble import (
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout, BatchNormalization
 from dotenv import load_dotenv
+from sklearn.model_selection import StratifiedKFold, cross_val_score
+from imblearn.over_sampling import SMOTE
+from imblearn.pipeline import Pipeline as ImbPipeline
 
 
 warnings.filterwarnings("ignore")
@@ -307,103 +314,159 @@ def build_preprocessor(X_train):
     )
     return preproc, num_cols, cat_cols
 
+
 def build_dl_model(input_dim):
-    model = Sequential([
-        Dense(128, activation='relu', input_dim=input_dim),
-        BatchNormalization(),
-        Dropout(0.3),
-        Dense(64, activation='relu'),
-        Dropout(0.3),
-        Dense(1, activation='sigmoid')
-    ])
-    model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+    model = Sequential(
+        [
+            Dense(256, activation="relu", input_dim=input_dim),
+            BatchNormalization(),
+            Dropout(0.4),
+            Dense(128, activation="relu"),
+            Dropout(0.3),
+            Dense(64, activation="relu"),
+            Dense(1, activation="sigmoid"),
+        ]
+    )
+    model.compile(optimizer="adam", loss="binary_crossentropy", metrics=["accuracy"])
     return model
+
 
 def get_model_by_name(name):
     name = name.strip().lower()
 
     if name == "decision tree":
-        return DecisionTreeClassifier(max_depth=6, class_weight="balanced", random_state=42)
+        return DecisionTreeClassifier(
+            max_depth=10,
+            min_samples_split=5,
+            min_samples_leaf=3,
+            class_weight="balanced",
+            random_state=42,
+        )
 
     if name in ("lasso", "sgd", "lasso (sgdclassifier)"):
-        return SGDClassifier(loss="log_loss", penalty="l1", alpha=0.001, class_weight="balanced", max_iter=1000, random_state=42)
+        return SGDClassifier(
+            loss="log_loss",
+            penalty="elasticnet",
+            alpha=0.0005,
+            l1_ratio=0.15,
+            class_weight="balanced",
+            max_iter=2000,
+            random_state=42,
+        )
 
     if name in ("ridge classifier", "ridge"):
         return RidgeClassifier(class_weight="balanced", random_state=42)
 
     if name in ("svm", "svm (rbf)"):
-        return SVC(kernel="rbf", C=1.5, gamma="scale", class_weight="balanced", probability=True, random_state=42)
+        return SVC(
+            kernel="rbf",
+            C=2.0,
+            gamma="auto",
+            class_weight="balanced",
+            probability=True,
+            random_state=42,
+        )
 
     if name in ("logistic regression", "logreg"):
-        return LogisticRegression(max_iter=1000, class_weight="balanced", random_state=42)
+        return LogisticRegression(
+            solver="liblinear", max_iter=2000, class_weight="balanced", random_state=42
+        )
 
     if name in ("random forest", "random_forest"):
         return RandomForestClassifier(
-            n_estimators=400,
-            max_depth=20,
-            min_samples_split=15,
-            class_weight="balanced",
+            n_estimators=800,
+            max_depth=None,
+            min_samples_split=4,
+            min_samples_leaf=2,
+            max_features="sqrt",
+            bootstrap=True,
+            class_weight="balanced_subsample",
             random_state=42,
             n_jobs=-1,
         )
 
     if name in ("extra trees", "extra_trees"):
         return ExtraTreesClassifier(
-            n_estimators=400,
-            max_depth=20,
+            n_estimators=800,
+            max_depth=None,
+            min_samples_split=4,
+            min_samples_leaf=2,
             class_weight="balanced",
+            bootstrap=False,
             random_state=42,
             n_jobs=-1,
         )
 
     if name in ("bagging", "bagging classifier"):
         return BaggingClassifier(
-            n_estimators=100,
+            n_estimators=200,
+            max_samples=0.8,
+            max_features=0.8,
             random_state=42,
             n_jobs=-1,
         )
 
     if name in ("adaboost", "adaboost classifier"):
         return AdaBoostClassifier(
-            n_estimators=200,
-            learning_rate=0.5,
+            n_estimators=400,
+            learning_rate=0.3,
             random_state=42,
         )
 
     if name in ("gradient boosting", "gradient_boosting"):
         return GradientBoostingClassifier(
-            n_estimators=200, learning_rate=0.1, max_depth=4, random_state=42
+            n_estimators=400,
+            learning_rate=0.05,
+            max_depth=5,
+            subsample=0.9,
+            random_state=42,
         )
 
     if name in ("hist gradient boosting", "histgradientboosting"):
-        return HistGradientBoostingClassifier(max_depth=8, learning_rate=0.05, random_state=42)
+        return HistGradientBoostingClassifier(
+            max_depth=10,
+            learning_rate=0.05,
+            max_iter=400,
+            l2_regularization=1.0,
+            random_state=42,
+        )
 
     if name in ("xgboost", "xgb", "xgboost classifier") and _xgb_available:
         return XGBClassifier(
-            n_estimators=400,
-            learning_rate=0.3,
-            max_depth=6,
+            n_estimators=800,
+            learning_rate=0.05,
+            max_depth=8,
             subsample=0.8,
             colsample_bytree=0.8,
+            reg_lambda=1.2,
             random_state=42,
             eval_metric="logloss",
             use_label_encoder=False,
         )
 
     if name in ("knn", "k-nearest neighbors"):
-        return KNeighborsClassifier(n_neighbors=5, weights="distance", n_jobs=-1)
+        return KNeighborsClassifier(
+            n_neighbors=8, weights="distance", metric="manhattan", n_jobs=-1
+        )
 
     if name in ("naive bayes", "gaussian nb"):
-        return GaussianNB()
+        return GaussianNB(var_smoothing=1e-9)
 
-    if name in ("perceptron",):
-        return Perceptron(max_iter=1000, class_weight="balanced", random_state=42)
+    if name == "perceptron":
+        return Perceptron(max_iter=1500, class_weight="balanced", random_state=42)
 
     if name in ("passive aggressive", "passiveaggressive"):
-        return PassiveAggressiveClassifier(max_iter=1000, class_weight="balanced", random_state=42)
-    
+        return PassiveAggressiveClassifier(
+            max_iter=1500, class_weight="balanced", random_state=42
+        )
+
     if name in ("deep learning", "neural network", "mlp"):
-        return KerasClassifier(build_fn=lambda: build_dl_model(X_all.shape[1]), epochs=50, batch_size=32, verbose=0)
+        return KerasClassifier(
+            build_fn=lambda: build_dl_model(X_all.shape[1]),
+            epochs=200,
+            batch_size=32,
+            verbose=0,
+        )
 
     return LogisticRegression(max_iter=1000, class_weight="balanced", random_state=42)
 
@@ -415,20 +478,35 @@ def train_and_cache(model_name, X_all, y_all):
 
     preproc, num_cols, cat_cols = build_preprocessor(X_all)
     model = get_model_by_name(model_name)
-    pipe = Pipeline([("pre", preproc), ("clf", model)])
+
+    pipe = ImbPipeline(
+        [("pre", preproc), ("smote", SMOTE(random_state=42)), ("clf", model)]
+    )
 
     X_train, X_test, y_train, y_test = train_test_split(
         X_all, y_all, test_size=0.2, random_state=42, stratify=y_all
     )
-    pipe.fit(X_train, y_train)
 
+    cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+    cv_scores = cross_val_score(pipe, X_all, y_all, cv=cv, scoring="accuracy")
+    cv_acc = cv_scores.mean()
+
+    pipe.fit(X_train, y_train)
     y_pred = pipe.predict(X_test)
+
     metrics = {
-        "accuracy": float(accuracy_score(y_test, y_pred)),
+        "train_accuracy": float(pipe.score(X_train, y_train)),
+        "test_accuracy": float(accuracy_score(y_test, y_pred)),
+        "cv_accuracy": float(cv_acc),
         "precision": float(precision_score(y_test, y_pred, zero_division=0)),
         "recall": float(recall_score(y_test, y_pred, zero_division=0)),
         "f1": float(f1_score(y_test, y_pred, zero_division=0)),
     }
+
+    print(
+        f"[{model_name}] Train: {metrics['train_accuracy']:.3f}, "
+        f"Test: {metrics['test_accuracy']:.3f}, CV: {metrics['cv_accuracy']:.3f}"
+    )
 
     models_cache[key] = {"pipeline": pipe, "metrics": metrics}
     pipelines_cache[key] = {
@@ -494,14 +572,14 @@ def predict_api():
     hours = float(req.get("hours_ahead", 3))
 
     model_name = str(req.get("model", "Random Forest")).strip()
+
     if model_name.lower() in ("best", "auto", "auto (best model)"):
         if models_cache:
             best_model_key = max(
-                models_cache.items(), key=lambda kv: kv[1]["metrics"].get("accuracy", 0)
+                models_cache.items(),
+                key=lambda kv: kv[1]["metrics"].get("cv_accuracy", 0),
             )[0]
-            used_model_name = (
-                best_model_key  
-            )
+            used_model_name = best_model_key
         else:
             used_model_name = "Random Forest"
         model_name = "Best Model"
@@ -558,7 +636,7 @@ def predict_api():
         return jsonify({"error": f"Prediction failed: {e}"}), 500
 
     metrics = model_info.get("metrics", {})
-    accuracy = metrics.get("accuracy", None)
+    accuracy = metrics.get("test_accuracy", None) or metrics.get("cv_accuracy", None)
 
     return jsonify(
         {
@@ -574,7 +652,6 @@ def predict_api():
     )
 
 
-# Optional endpoint to retrain/clear cache
 @app.route("/retrain", methods=["POST"])
 def retrain():
     """
@@ -592,6 +669,7 @@ def retrain():
         models_cache.pop(k, None)
         pipelines_cache.pop(k, None)
         return jsonify({"status": f"cleared {model}"}), 200
+
 
 if __name__ == "__main__":
     print("Available models:", AVAILABLE_MODELS)
