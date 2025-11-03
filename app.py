@@ -516,6 +516,56 @@ def train_and_cache(model_name, X_all, y_all):
     }
     return models_cache[key], pipelines_cache[key]
 
+def train_blended_model(X_all, y_all):
+    """
+    Ensemble blending using several strong base models + Logistic Regression as meta-model.
+    """
+    base_models = [
+        ("rf", get_model_by_name("Random Forest")),
+        ("xgb", get_model_by_name("XGBoost")),
+        ("gb", get_model_by_name("Gradient Boosting")),
+        ("et", get_model_by_name("Extra Trees")),
+    ]
+
+    preproc, num_cols, cat_cols = build_preprocessor(X_all)
+
+    blend_train, blend_test, y_train, y_test = train_test_split(
+        X_all, y_all, test_size=0.2, stratify=y_all, random_state=42
+    )
+
+    meta_train = np.zeros((blend_train.shape[0], len(base_models)))
+    meta_test = np.zeros((blend_test.shape[0], len(base_models)))
+
+    for i, (name, model) in enumerate(base_models):
+        pipe = ImbPipeline([
+            ("pre", preproc),
+            ("smote", SMOTE(random_state=42)),
+            ("clf", model),
+        ])
+        pipe.fit(blend_train, y_train)
+
+        meta_train[:, i] = pipe.predict_proba(blend_train)[:, 1]
+        meta_test[:, i] = pipe.predict_proba(blend_test)[:, 1]
+
+    meta_model = LogisticRegression(max_iter=1000, random_state=42)
+    meta_model.fit(meta_train, y_train)
+    y_pred = meta_model.predict(meta_test)
+
+    metrics = {
+        "train_accuracy": float(meta_model.score(meta_train, y_train)),
+        "test_accuracy": float(accuracy_score(y_test, y_pred)),
+        "precision": float(precision_score(y_test, y_pred, zero_division=0)),
+        "recall": float(recall_score(y_test, y_pred, zero_division=0)),
+        "f1": float(f1_score(y_test, y_pred, zero_division=0)),
+    }
+
+    print(f"[Blending Ensemble] Test Accuracy: {metrics['test_accuracy']:.3f}")
+
+    models_cache["ensemble_blend"] = {
+        "pipeline": (base_models, meta_model, preproc),
+        "metrics": metrics,
+    }
+    return models_cache["ensemble_blend"]
 
 if os.path.exists(DATA_FILE):
     try:
@@ -547,6 +597,7 @@ AVAILABLE_MODELS = [
     "Naive Bayes",
     "Perceptron",
     "Passive Aggressive",
+    "Ensemble Blending",
 ]
 if _xgb_available:
     AVAILABLE_MODELS.insert(4, "XGBoost")
@@ -570,7 +621,6 @@ def predict_api():
     req = request.get_json(force=True)
     city = req.get("city")
     hours = float(req.get("hours_ahead", 3))
-
     model_name = str(req.get("model", "Random Forest")).strip()
 
     if model_name.lower() in ("best", "auto", "auto (best model)"):
@@ -619,6 +669,28 @@ def predict_api():
     df_user = pd.DataFrame([rec])
     X_user, _, _ = prepare_df_for_model(df_user)
 
+    if used_model_name.lower() == "ensemble blending":
+        model_info = train_blended_model(X_all, y_all)
+        base_models, meta_model, preproc = model_info["pipeline"]
+
+        X_user_proc = preproc.transform(X_user)
+        meta_features = [m.predict_proba(X_user_proc)[:, 1][0] for _, m in base_models]
+        meta_input = np.array(meta_features).reshape(1, -1)
+        prob = float(meta_model.predict_proba(meta_input)[0][1])
+
+        metrics = model_info["metrics"]
+        accuracy = metrics.get("test_accuracy", None)
+
+        return jsonify({
+            "model": "Ensemble Blending",
+            "used_model": "Blending Ensemble",
+            "city": city,
+            "datetime": rec["datetime"],
+            "rain_probability": round(prob * 100, 2),
+            "accuracy": round(accuracy * 100, 2) if accuracy else None,
+            "metrics": metrics,
+        })
+
     try:
         model_info, _ = train_and_cache(used_model_name, X_all, y_all)
     except Exception as e:
@@ -638,19 +710,16 @@ def predict_api():
     metrics = model_info.get("metrics", {})
     accuracy = metrics.get("test_accuracy", None) or metrics.get("cv_accuracy", None)
 
-    return jsonify(
-        {
-            "model": model_name,
-            "used_model": used_model_name,
-            "is_best_model": model_name.lower().startswith("best"),
-            "city": city,
-            "datetime": rec["datetime"],
-            "rain_probability": round(prob * 100, 2),
-            "accuracy": round(accuracy * 100, 2) if accuracy is not None else None,
-            "metrics": metrics,
-        }
-    )
-
+    return jsonify({
+        "model": model_name,
+        "used_model": used_model_name,
+        "is_best_model": model_name.lower().startswith("best"),
+        "city": city,
+        "datetime": rec["datetime"],
+        "rain_probability": round(prob * 100, 2),
+        "accuracy": round(accuracy * 100, 2) if accuracy is not None else None,
+        "metrics": metrics,
+    })
 
 @app.route("/retrain", methods=["POST"])
 def retrain():
