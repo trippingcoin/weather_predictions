@@ -189,20 +189,39 @@
       <optgroup label="Tree-Based Models">
         <option>Decision Tree</option>
         <option>Random Forest</option>
+        <option>Extra Trees</option>
         <option>Gradient Boosting</option>
-        <option>XGBoost Classifier</option>
+        <option>Hist Gradient Boosting</option>
+        <option>XGBoost</option>
       </optgroup>
 
-      <optgroup label="Linear Models">
+      <optgroup label="📈 Linear Models">
         <option>Logistic Regression</option>
         <option>Lasso (SGDClassifier)</option>
+        <option>Ridge Classifier</option>
+        <option>Perceptron</option>
+        <option>Passive Aggressive</option>
       </optgroup>
 
-      <optgroup label="⚙️ Kernel Methods">
+      <optgroup label="⚙️ Kernel & Distance Models">
         <option>SVM (RBF)</option>
+        <option>KNN</option>
       </optgroup>
 
-      <optgroup label="Other / Default">
+      <optgroup label="Ensemble / Boosting">
+        <option>AdaBoost</option>
+        <option>Bagging</option>
+      </optgroup>
+
+      <optgroup label="🔍 Probabilistic Models">
+        <option>Naive Bayes</option>
+      </optgroup>
+
+      <optgroup label="🧠 Deep Learning">
+        <option>Deep Learning (MLP)</option>
+      </optgroup>
+
+      <optgroup label="✨ Auto Selection">
         <option value="best">Auto (Best Model)</option>
       </optgroup>
     </select>
@@ -239,7 +258,7 @@
         loading.style.display = 'none';
 
         if (data.error) {
-          resultDiv.innerHTML = `<span style="color:red;">❌ ${data.error}</span>`;
+          resultDiv.innerHTML = `<span style="color:red;"> ${data.error}</span>`;
           return;
         }
 
@@ -251,12 +270,10 @@
         const usedModel = data.used_model || modelName;
         const isBest = data.is_best_model;
 
-        // ✅ Формат вывода названия модели
         const modelDisplay = isBest
           ? `Best Model (${usedModel})`
           : usedModel;
 
-        // ✅ Вывод результата
         resultDiv.innerHTML = `
         <div><b>${cityName}</b><br>
         Forecast Time: ${time}</div><hr>
@@ -264,12 +281,12 @@
           <span class="${prob >= 50 ? 'rain' : 'sun'}">${prob}%</span>
         </div>
         <div><b>Model Used:</b> ${modelDisplay}</div>
-        <div>📊 Accuracy: <b>${acc}%</b></div>
+        <div>Accuracy: <b>${acc}%</b></div>
         <div><b>Prediction:</b> ${prob >= 60
-            ? "🌧️ High chance of rain!"
+            ? "High chance of rain!"
             : prob >= 30
-              ? "🌤️ Possible light rain."
-              : "☀️ Mostly clear."
+              ? "Possible light rain."
+              : "Mostly clear."
           }</div>
       `;
       } catch (err) {

@@ -3,9 +3,6 @@ import os, time, requests
 import pandas as pd
 import numpy as np
 import warnings
-
-warnings.filterwarnings("ignore")
-
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
@@ -16,6 +13,20 @@ from sklearn.tree import DecisionTreeClassifier
 from sklearn.linear_model import SGDClassifier, LogisticRegression
 from sklearn.svm import SVC
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
+from sklearn.neighbors import KNeighborsClassifier
+from sklearn.naive_bayes import GaussianNB
+from sklearn.linear_model import RidgeClassifier, Perceptron, PassiveAggressiveClassifier
+from sklearn.ensemble import (
+    AdaBoostClassifier,
+    ExtraTreesClassifier,
+    BaggingClassifier,
+    HistGradientBoostingClassifier,
+)
+from tensorflow.keras.models import Sequential
+from tensorflow.keras.layers import Dense, Dropout, BatchNormalization
+
+
+warnings.filterwarnings("ignore")
 
 app = Flask(__name__)
 
@@ -27,11 +38,9 @@ except Exception:
     _xgb_available = False
 
 
-# --- Загрузка данных (пример с weather.csv) ---
 API_KEY = "cd59f6e78b8ec3e0d4b69f9e55d80e1c"
 DATA_FILE = "weather_data.csv"
 
-# Казахстан 🇰🇿
 CITY_QUERIES = {
     "Astana": ["Astana,KZ", "Nur-Sultan,KZ", "Akmola,KZ"],
     "Almaty": ["Almaty,KZ", "Alma-Ata,KZ"],
@@ -58,7 +67,6 @@ CITY_QUERIES = {
     "Oral": ["Oral,KZ", "Uralsk,KZ"],
 }
 
-# Европы 🇪🇺
 EUROPE_CAPITALS = {
     "Vienna (Austria)": ["Vienna,AT"],
     "Brussels (Belgium)": ["Brussels,BE"],
@@ -114,15 +122,12 @@ MODEL_FEATURES = [
     "city",
 ]
 
-# Объединяем словари
 CITY_QUERIES.update(EUROPE_CAPITALS)
 
 models_cache = {}
 pipelines_cache = {}
 
 
-# Utilities: fetch / build dataset
-# ---------------------------
 def geocode_best(q_list):
     for q in q_list:
         try:
@@ -204,13 +209,11 @@ def build_weather_dataset():
 
 def prepare_df_for_model(df_raw):
     df = df_raw.copy()
-    # ensure datetime
     if "datetime" in df.columns:
         df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
     else:
         df["datetime"] = pd.NaT
 
-    # Basic imputation for numeric fields commonly used
     num_cols = [
         "temp",
         "feels_like",
@@ -228,24 +231,20 @@ def prepare_df_for_model(df_raw):
             df[c] = pd.to_numeric(df[c], errors="coerce")
             df[c] = df[c].fillna(df[c].median())
 
-    # Fill categorical
     for c in ["city", "weather_main"]:
         if c in df.columns:
             df[c] = df[c].fillna("Unknown").astype(str)
 
-    # Time features
     df["hour"] = df["datetime"].dt.hour.fillna(0).astype(int)
     df["month"] = df["datetime"].dt.month.fillna(1).astype(int)
     df["dow"] = df["datetime"].dt.dayofweek.fillna(0).astype(int)
     df["is_weekend"] = (df["dow"] >= 5).astype(int)
 
-    # Cyclical encodings
     df["hour_sin"] = np.sin(2 * np.pi * df["hour"] / 24)
     df["hour_cos"] = np.cos(2 * np.pi * df["hour"] / 24)
     df["mon_sin"] = np.sin(2 * np.pi * df["month"] / 12)
     df["mon_cos"] = np.cos(2 * np.pi * df["month"] / 12)
 
-    # Season (coarse)
     def season_from_month(m):
         if m in [12, 1, 2]:
             return "Winter"
@@ -257,12 +256,9 @@ def prepare_df_for_model(df_raw):
 
     df["season"] = df["month"].apply(season_from_month)
 
-    # Simple composites
     df["wind_power"] = df["wind_speed"] ** 2
     df["humid_cloud"] = df["humidity"] * df["clouds"] / 100.0
 
-    # Select features for modeling (we keep season and city as categorical)
-    # Note: we intentionally do NOT use lag/rolling features here to allow single-row predict
     features = []
     for f in MODEL_FEATURES:
         if f in ["season", "city"]:
@@ -270,7 +266,6 @@ def prepare_df_for_model(df_raw):
         elif f in df.columns:
             features.append(f)
         else:
-            # if some expected numeric column is missing, create it with median/0
             df[f] = 0.0
             features.append(f)
 
@@ -281,7 +276,6 @@ def prepare_df_for_model(df_raw):
 
 
 def build_preprocessor(X_train):
-    # Find numeric vs categorical in X_train
     num_cols = X_train.select_dtypes(include=[np.number]).columns.tolist()
     cat_cols = [c for c in X_train.columns if c not in num_cols]
 
@@ -296,7 +290,6 @@ def build_preprocessor(X_train):
             ]
         )
     except TypeError:
-        # fallback для старых sklearn
         cat_pipe = Pipeline(
             [
                 ("imp", SimpleImputer(strategy="most_frequent")),
@@ -308,37 +301,35 @@ def build_preprocessor(X_train):
     )
     return preproc, num_cols, cat_cols
 
+def build_dl_model(input_dim):
+    model = Sequential([
+        Dense(128, activation='relu', input_dim=input_dim),
+        BatchNormalization(),
+        Dropout(0.3),
+        Dense(64, activation='relu'),
+        Dropout(0.3),
+        Dense(1, activation='sigmoid')
+    ])
+    model.compile(optimizer='adam', loss='binary_crossentropy', metrics=['accuracy'])
+    return model
 
-# ---------------------------
-# Model creation helper
-# ---------------------------
 def get_model_by_name(name):
     name = name.strip().lower()
 
     if name == "decision tree":
-        return DecisionTreeClassifier(
-            max_depth=6, class_weight="balanced", random_state=42
-        )
+        return DecisionTreeClassifier(max_depth=6, class_weight="balanced", random_state=42)
 
     if name in ("lasso", "sgd", "lasso (sgdclassifier)"):
-        return SGDClassifier(
-            loss="log_loss",
-            penalty="l1",
-            alpha=0.001,
-            class_weight="balanced",
-            max_iter=1000,
-            random_state=42,
-        )
+        return SGDClassifier(loss="log_loss", penalty="l1", alpha=0.001, class_weight="balanced", max_iter=1000, random_state=42)
+
+    if name in ("ridge classifier", "ridge"):
+        return RidgeClassifier(class_weight="balanced", random_state=42)
 
     if name in ("svm", "svm (rbf)"):
-        return SVC(
-            kernel="rbf",
-            C=1.5,
-            gamma="scale",
-            class_weight="balanced",
-            probability=True,
-            random_state=42,
-        )
+        return SVC(kernel="rbf", C=1.5, gamma="scale", class_weight="balanced", probability=True, random_state=42)
+
+    if name in ("logistic regression", "logreg"):
+        return LogisticRegression(max_iter=1000, class_weight="balanced", random_state=42)
 
     if name in ("random forest", "random_forest"):
         return RandomForestClassifier(
@@ -350,16 +341,27 @@ def get_model_by_name(name):
             n_jobs=-1,
         )
 
-    if name in ("xgboost", "xgb", "xgboost classifier") and _xgb_available:
-        return XGBClassifier(
+    if name in ("extra trees", "extra_trees"):
+        return ExtraTreesClassifier(
             n_estimators=400,
-            learning_rate=0.5,
-            max_depth=3,
-            subsample=0.4,
-            colsample_bytree=0.5,
+            max_depth=20,
+            class_weight="balanced",
             random_state=42,
-            eval_metric="logloss",
-            use_label_encoder=False,
+            n_jobs=-1,
+        )
+
+    if name in ("bagging", "bagging classifier"):
+        return BaggingClassifier(
+            n_estimators=100,
+            random_state=42,
+            n_jobs=-1,
+        )
+
+    if name in ("adaboost", "adaboost classifier"):
+        return AdaBoostClassifier(
+            n_estimators=200,
+            learning_rate=0.5,
+            random_state=42,
         )
 
     if name in ("gradient boosting", "gradient_boosting"):
@@ -367,31 +369,53 @@ def get_model_by_name(name):
             n_estimators=200, learning_rate=0.1, max_depth=4, random_state=42
         )
 
-    # fallback
-    return LogisticRegression(max_iter=1000)
+    if name in ("hist gradient boosting", "histgradientboosting"):
+        return HistGradientBoostingClassifier(max_depth=8, learning_rate=0.05, random_state=42)
+
+    if name in ("xgboost", "xgb", "xgboost classifier") and _xgb_available:
+        return XGBClassifier(
+            n_estimators=400,
+            learning_rate=0.3,
+            max_depth=6,
+            subsample=0.8,
+            colsample_bytree=0.8,
+            random_state=42,
+            eval_metric="logloss",
+            use_label_encoder=False,
+        )
+
+    if name in ("knn", "k-nearest neighbors"):
+        return KNeighborsClassifier(n_neighbors=5, weights="distance", n_jobs=-1)
+
+    if name in ("naive bayes", "gaussian nb"):
+        return GaussianNB()
+
+    if name in ("perceptron",):
+        return Perceptron(max_iter=1000, class_weight="balanced", random_state=42)
+
+    if name in ("passive aggressive", "passiveaggressive"):
+        return PassiveAggressiveClassifier(max_iter=1000, class_weight="balanced", random_state=42)
+    
+    if name in ("deep learning", "neural network", "mlp"):
+        return KerasClassifier(build_fn=lambda: build_dl_model(X_all.shape[1]), epochs=50, batch_size=32, verbose=0)
+
+    return LogisticRegression(max_iter=1000, class_weight="balanced", random_state=42)
 
 
-# ---------------------------
-# Training wrapper (caches models and preprocessors)
-# ---------------------------
 def train_and_cache(model_name, X_all, y_all):
     key = model_name.lower()
     if key in models_cache and key in pipelines_cache:
         return models_cache[key], pipelines_cache[key]
 
-    # build preprocessor from X_all
     preproc, num_cols, cat_cols = build_preprocessor(X_all)
-    # build pipeline
     model = get_model_by_name(model_name)
     pipe = Pipeline([("pre", preproc), ("clf", model)])
 
-    # train/test split (grouping avoided here; consistent random split)
     X_train, X_test, y_train, y_test = train_test_split(
         X_all, y_all, test_size=0.2, random_state=42, stratify=y_all
     )
     pipe.fit(X_train, y_train)
 
-    # evaluate on test
     y_pred = pipe.predict(X_test)
     metrics = {
         "accuracy": float(accuracy_score(y_test, y_pred)),
@@ -409,9 +433,6 @@ def train_and_cache(model_name, X_all, y_all):
     return models_cache[key], pipelines_cache[key]
 
 
-# ---------------------------
-# Load or build dataset (on startup)
-# ---------------------------
 if os.path.exists(DATA_FILE):
     try:
         df_raw = pd.read_csv(DATA_FILE)
@@ -423,27 +444,32 @@ else:
     print(f"{DATA_FILE} not found — building from API...")
     df_raw = build_weather_dataset()
 
-# Prepare training X,y and full prepared df
 X_all, y_all, df_prepared = prepare_df_for_model(df_raw)
 
-# Keep the list of available models for the frontend
 AVAILABLE_MODELS = [
     "Decision Tree",
     "Lasso (SGDClassifier)",
+    "Ridge Classifier",
     "SVM (RBF)",
+    "Logistic Regression",
     "Random Forest",
+    "Extra Trees",
+    "Bagging",
+    "AdaBoost",
     "Gradient Boosting",
+    "Hist Gradient Boosting",
+    "XGBoost",
+    "KNN",
+    "Naive Bayes",
+    "Perceptron",
+    "Passive Aggressive",
 ]
 if _xgb_available:
     AVAILABLE_MODELS.insert(4, "XGBoost")
 
 
-# ---------------------------
-# Flask endpoints
-# ---------------------------
 @app.route("/")
 def index():
-    # Serve a simple form if you have index.html in templates, else return available models
     try:
         return render_template("index.html", models=AVAILABLE_MODELS)
     except Exception:
@@ -463,22 +489,19 @@ def predict_api():
 
     model_name = str(req.get("model", "Random Forest")).strip()
     if model_name.lower() in ("best", "auto", "auto (best model)"):
-        # выбираем лучшую модель
         if models_cache:
             best_model_key = max(
                 models_cache.items(), key=lambda kv: kv[1]["metrics"].get("accuracy", 0)
             )[0]
             used_model_name = (
-                best_model_key  # имя модели из keys (подкорректируй формат)
+                best_model_key  
             )
         else:
-            # если кэша нет — обучаем всех кандидатов и выбираем (см. ниже)
             used_model_name = "Random Forest"
         model_name = "Best Model"
     else:
         used_model_name = model_name
 
-    # --- геокодирование ---
     qlist = CITY_QUERIES.get(city, [f"{city},KZ"])
     geo = geocode_best(qlist)
     if not geo:
@@ -489,7 +512,6 @@ def predict_api():
     if not data or "list" not in data:
         return jsonify({"error": f"No forecast available for {city}"}), 400
 
-    # --- выбираем ближайший прогноз ---
     target = pd.Timestamp.now() + pd.to_timedelta(hours, unit="h")
     fl = pd.DataFrame(data["list"])
     fl["datetime"] = pd.to_datetime(fl["dt_txt"])
@@ -565,10 +587,6 @@ def retrain():
         pipelines_cache.pop(k, None)
         return jsonify({"status": f"cleared {model}"}), 200
 
-
-# ---------------------------
-# Run app
-# ---------------------------
 if __name__ == "__main__":
     print("Available models:", AVAILABLE_MODELS)
-    app.run(debug=True, host="127.0.0.1", port=5000)
+    app.run(debug=False, host="127.0.0.1", port=5000, threaded=False)
