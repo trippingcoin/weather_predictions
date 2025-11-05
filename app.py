@@ -10,41 +10,22 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from sklearn.tree import DecisionTreeClassifier
-from sklearn.linear_model import SGDClassifier, LogisticRegression
+from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.neighbors import KNeighborsClassifier
-from sklearn.naive_bayes import GaussianNB
-from sklearn.linear_model import (
-    RidgeClassifier,
-    Perceptron,
-    PassiveAggressiveClassifier,
-)
-from sklearn.ensemble import (
-    AdaBoostClassifier,
-    ExtraTreesClassifier,
-    BaggingClassifier,
-    HistGradientBoostingClassifier,
-)
+from sklearn.model_selection import GridSearchCV
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout, BatchNormalization
 from dotenv import load_dotenv
 from sklearn.model_selection import StratifiedKFold, cross_val_score
 from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline as ImbPipeline
-from sklearn.ensemble import StackingClassifier
 
 
 warnings.filterwarnings("ignore")
 
 app = Flask(__name__)
-
-try:
-    from xgboost import XGBClassifier
-
-    _xgb_available = True
-except Exception:
-    _xgb_available = False
 
 load_dotenv()
 
@@ -334,7 +315,11 @@ def build_dl_model(input_dim):
     return model
 
 
-def get_model_by_name(name):
+def get_model_by_name(name, X=None, y=None):
+    """
+    Returns a model by name. For Random Forest and Gradient Boosting,
+    performs GridSearchCV if X and y are provided, otherwise returns default.
+    """
     name = name.strip().lower()
 
     if name == "decision tree":
@@ -345,20 +330,6 @@ def get_model_by_name(name):
             class_weight="balanced",
             random_state=42,
         )
-
-    if name in ("lasso", "sgd", "lasso (sgdclassifier)"):
-        return SGDClassifier(
-            loss="log_loss",
-            penalty="elasticnet",
-            alpha=0.0005,
-            l1_ratio=0.15,
-            class_weight="balanced",
-            max_iter=2000,
-            random_state=42,
-        )
-
-    if name in ("ridge classifier", "ridge"):
-        return RidgeClassifier(class_weight="balanced", random_state=42)
 
     if name in ("svm", "svm (rbf)"):
         return SVC(
@@ -376,7 +347,7 @@ def get_model_by_name(name):
         )
 
     if name in ("random forest", "random_forest"):
-        return RandomForestClassifier(
+        default_params = dict(
             n_estimators=400,
             max_depth=14,
             min_samples_split=6,
@@ -387,37 +358,34 @@ def get_model_by_name(name):
             random_state=42,
             n_jobs=-1,
         )
-
-    if name in ("extra trees", "extra_trees"):
-        return ExtraTreesClassifier(
-            n_estimators=800,
-            max_depth=None,
-            min_samples_split=4,
-            min_samples_leaf=2,
-            class_weight="balanced",
-            bootstrap=False,
-            random_state=42,
-            n_jobs=-1,
-        )
-
-    if name in ("bagging", "bagging classifier"):
-        return BaggingClassifier(
-            n_estimators=150,
-            max_samples=0.7,
-            max_features=0.7,
-            random_state=42,
-            n_jobs=-1,
-        )
-
-    if name in ("adaboost", "adaboost classifier"):
-        return AdaBoostClassifier(
-            n_estimators=400,
-            learning_rate=0.3,
-            random_state=42,
-        )
+        model = RandomForestClassifier(**default_params)
+        # GridSearchCV only if X and y provided
+        if X is not None and y is not None:
+            param_grid = {
+                "n_estimators": [200, 400],
+                "max_depth": [10, 14, 18],
+                "min_samples_leaf": [2, 4],
+                "max_features": ["sqrt", "log2"],
+            }
+            gs = GridSearchCV(
+                RandomForestClassifier(**default_params),
+                param_grid,
+                cv=3,
+                scoring="accuracy",
+                n_jobs=-1,
+                verbose=0,
+            )
+            gs.fit(X, y)
+            # Return best estimator if improved, else default
+            if hasattr(gs, "best_estimator_") and gs.best_score_ >= getattr(gs, "best_score_", 0):
+                return gs.best_estimator_
+            else:
+                return model
+        else:
+            return model
 
     if name in ("gradient boosting", "gradient_boosting"):
-        return GradientBoostingClassifier(
+        default_params = dict(
             n_estimators=400,
             learning_rate=0.05,
             max_depth=4,
@@ -425,31 +393,29 @@ def get_model_by_name(name):
             min_samples_leaf=4,
             random_state=42,
         )
-
-    if name in ("hist gradient boosting", "histgradientboosting"):
-        return HistGradientBoostingClassifier(
-            max_depth=8,
-            learning_rate=0.05,
-            max_iter=300,
-            l2_regularization=2.0,
-            min_samples_leaf=5,
-            random_state=42,
-        )
-
-    if name in ("xgboost", "xgb", "xgboost classifier") and _xgb_available:
-        return XGBClassifier(
-            n_estimators=600,
-            learning_rate=0.05,
-            max_depth=6,
-            subsample=0.8,
-            colsample_bytree=0.7,
-            reg_lambda=3.0,  
-            reg_alpha=1.0,  
-            gamma=0.2,
-            random_state=42,
-            eval_metric="logloss",
-            use_label_encoder=False,
-        )
+        model = GradientBoostingClassifier(**default_params)
+        if X is not None and y is not None:
+            param_grid = {
+                "n_estimators": [200, 400],
+                "learning_rate": [0.03, 0.05, 0.1],
+                "max_depth": [3, 4, 6],
+                "subsample": [0.8, 0.9, 1.0],
+            }
+            gs = GridSearchCV(
+                GradientBoostingClassifier(**default_params),
+                param_grid,
+                cv=3,
+                scoring="accuracy",
+                n_jobs=-1,
+                verbose=0,
+            )
+            gs.fit(X, y)
+            if hasattr(gs, "best_estimator_") and gs.best_score_ >= getattr(gs, "best_score_", 0):
+                return gs.best_estimator_
+            else:
+                return model
+        else:
+            return model
 
     if name in ("knn", "k-nearest neighbors"):
         return KNeighborsClassifier(
@@ -459,42 +425,12 @@ def get_model_by_name(name):
             n_jobs=-1,
         )
 
-    if name in ("naive bayes", "gaussian nb"):
-        return GaussianNB(var_smoothing=1e-9)
-
-    if name == "perceptron":
-        return Perceptron(max_iter=1500, class_weight="balanced", random_state=42)
-
-    if name in ("passive aggressive", "passiveaggressive"):
-        return PassiveAggressiveClassifier(
-            max_iter=1500, class_weight="balanced", random_state=42
-        )
-
     if name in ("deep learning", "neural network", "mlp"):
         return KerasClassifier(
             build_fn=lambda: build_dl_model(X_all.shape[1]),
             epochs=200,
             batch_size=32,
             verbose=0,
-        )
-    
-    if name in ("stacking", "stacking ensemble"):
-        estimators = [
-            ("rf", get_model_by_name("Random Forest")),
-            ("gb", get_model_by_name("Gradient Boosting")),
-            ("xgb", get_model_by_name("XGBoost")),
-        ]
-        final_estimator = LogisticRegression(
-            max_iter=2000,
-            penalty="l2",
-            C=0.5,
-            random_state=42,
-        )
-        return StackingClassifier(
-            estimators=estimators,
-            final_estimator=final_estimator,
-            n_jobs=-1,
-            passthrough=False,
         )
 
     return LogisticRegression(max_iter=1000, class_weight="balanced", random_state=42)
@@ -506,9 +442,16 @@ def train_and_cache(model_name, X_all, y_all):
         return models_cache[key], pipelines_cache[key]
 
     preproc, num_cols, cat_cols = build_preprocessor(X_all)
-    model = get_model_by_name(model_name)
 
-    pipe = ImbPipeline([    
+    # For strong models, perform grid search on preprocessed data
+    if key in ("random forest", "random_forest", "gradient boosting", "gradient_boosting"):
+        # Fit preproc to X_all, get np array for gridsearch
+        X_proc = preproc.fit_transform(X_all)
+        model = get_model_by_name(model_name, X_proc, y_all)
+    else:
+        model = get_model_by_name(model_name)
+
+    pipe = ImbPipeline([
         ("pre", preproc),
         ("smote", SMOTE(random_state=42, sampling_strategy=0.6)),
         ("clf", model),
@@ -551,14 +494,15 @@ def train_blended_model(X_all, y_all):
     """
     Ensemble blending using several strong base models + Logistic Regression as meta-model.
     """
-    base_models = [
-        ("rf", get_model_by_name("Random Forest")),
-        ("xgb", get_model_by_name("XGBoost")),
-        ("gb", get_model_by_name("Gradient Boosting")),
-        ("et", get_model_by_name("Extra Trees")),
-    ]
-
+    # Use grid search for base models
     preproc, num_cols, cat_cols = build_preprocessor(X_all)
+    X_proc = preproc.fit_transform(X_all)
+    rf_model = get_model_by_name("Random Forest", X_proc, y_all)
+    gb_model = get_model_by_name("Gradient Boosting", X_proc, y_all)
+    base_models = [
+        ("rf", rf_model),
+        ("gb", gb_model),
+    ]
 
     blend_train, blend_test, y_train, y_test = train_test_split(
         X_all, y_all, test_size=0.2, stratify=y_all, random_state=42
@@ -609,33 +553,50 @@ else:
     print(f"{DATA_FILE} not found — building from API...")
     df_raw = build_weather_dataset()
 
-X_all, y_all, df_prepared = prepare_df_for_model(df_raw)
+# Advanced feature engineering
+
+# Add time-based and derived features before model preparation
 df_raw["temp_prev"] = df_raw["temp"].shift(1).fillna(df_raw["temp"].median())
 df_raw["humidity_prev"] = df_raw["humidity"].shift(1).fillna(df_raw["humidity"].median())
+df_raw["pressure_prev"] = df_raw["pressure"].shift(1).fillna(df_raw["pressure"].median())
+df_raw["pressure_change"] = df_raw["pressure"] - df_raw["pressure_prev"]
+df_raw["temp_trend_3h"] = df_raw["temp"].rolling(window=3, min_periods=1).mean()
+df_raw["humidity_trend_3h"] = df_raw["humidity"].rolling(window=3, min_periods=1).mean()
+df_raw["feels_diff"] = df_raw["feels_like"] - df_raw["temp"]
+df_raw["wind_humid_ratio"] = df_raw["wind_speed"] / (df_raw["humidity"] + 1)
+
+# Dew point approximation (in °C)
+df_raw["dew_point"] = df_raw["temp"] - ((100 - df_raw["humidity"]) / 5)
+
+# Temperature variability and trend features
+df_raw["temp_std_6h"] = df_raw["temp"].rolling(window=6, min_periods=1).std().fillna(0)
+df_raw["temp_trend_6h"] = df_raw["temp"].rolling(window=6, min_periods=1).mean()
+
+# Wind and pressure dynamics
+df_raw["wind_power_trend"] = df_raw["wind_speed"].rolling(window=3, min_periods=1).mean() ** 2
+df_raw["pressure_change_rate"] = df_raw["pressure"].diff().fillna(0)
+
+# Humidity dynamics
+df_raw["humidity_trend_6h"] = df_raw["humidity"].rolling(window=6, min_periods=1).mean()
+
+# Combined indicators
+df_raw["cloud_humidity_ratio"] = df_raw["clouds"] / (df_raw["humidity"] + 1)
+df_raw["temp_feels_gap"] = df_raw["feels_like"] - df_raw["temp"]
+
+# Replace NaNs that may appear due to rolling calculations
+df_raw = df_raw.fillna(0)
+
+X_all, y_all, df_prepared = prepare_df_for_model(df_raw)
 
 AVAILABLE_MODELS = [
     "Decision Tree",
-    "Lasso (SGDClassifier)",
-    "Ridge Classifier",
     "SVM (RBF)",
     "Logistic Regression",
     "Random Forest",
-    "Extra Trees",
-    "Bagging",
-    "AdaBoost",
     "Gradient Boosting",
-    "Hist Gradient Boosting",
-    "XGBoost",
     "KNN",
-    "Naive Bayes",
-    "Perceptron",
-    "Passive Aggressive",
     "Ensemble Blending",
-    "Stacking Ensemble",
 ]
-if _xgb_available:
-    AVAILABLE_MODELS.insert(4, "XGBoost")
-
 
 @app.route("/")
 def index():
