@@ -34,7 +34,7 @@ if not API_KEY:
     raise ValueError("Missing API_KEY. Please set it in your .env file.")
 
 # API_KEY = "cd59f6e78b8ec3e0d4b69f9e55d80e1c"
-DATA_FILE = "weather_data.csv"
+DATA_FILE = "data/weather_data.csv"
 
 CITY_QUERIES = {
     "Astana": ["Astana,KZ", "Nur-Sultan,KZ", "Akmola,KZ"],
@@ -102,21 +102,21 @@ EUROPE_CAPITALS = {
 }
 
 MODEL_FEATURES = [
-    "temp",
-    "feels_like",
-    "pressure",
-    "humidity",
-    "clouds",
-    "wind_speed",
-    "hour_sin",
+    "temp",             
+    "feels_like",     
+    "pressure",        
+    "humidity",         
+    "wind_speed",        
+    "wind_deg",        
+    "hour_sin",       
     "hour_cos",
-    "mon_sin",
+    "mon_sin",        
     "mon_cos",
-    "is_weekend",
-    "season",
-    "city",
-    "temp_prev",
-    "humidity_prev",
+    "is_weekend",       
+    "season",       
+    "city",              
+    "wind_power",        
+    "humid_cloud",       
 ]
 
 CITY_QUERIES.update(EUROPE_CAPITALS)
@@ -206,31 +206,43 @@ def build_weather_dataset():
 
 def prepare_df_for_model(df_raw):
     df = df_raw.copy()
+
+    rename_map = {
+        "time": "datetime",
+        "rhum": "humidity",
+        "wspd": "wind_speed",
+        "wdir": "wind_deg",
+        "prcp": "rain_3h",
+        "snow": "snow_3h",
+        "pres": "pressure",
+        "temp": "temp",
+        "dwpt": "feels_like", 
+        "city": "city",
+    }
+    df = df.rename(columns=rename_map)
+
     if "datetime" in df.columns:
         df["datetime"] = pd.to_datetime(df["datetime"], errors="coerce")
     else:
         df["datetime"] = pd.NaT
 
     num_cols = [
-        "temp",
-        "feels_like",
-        "pressure",
-        "humidity",
-        "clouds",
-        "wind_speed",
-        "pop",
-        "wind_deg",
-        "rain_3h",
-        "snow_3h",
+        "temp", "feels_like", "pressure", "humidity",
+        "clouds", "wind_speed", "pop", "wind_deg",
+        "rain_3h", "snow_3h"
     ]
     for c in num_cols:
         if c in df.columns:
             df[c] = pd.to_numeric(df[c], errors="coerce")
             df[c] = df[c].fillna(df[c].median())
+        else:
+            df[c] = 0.0
 
     for c in ["city", "weather_main"]:
         if c in df.columns:
             df[c] = df[c].fillna("Unknown").astype(str)
+        else:
+            df[c] = "Unknown"
 
     df["hour"] = df["datetime"].dt.hour.fillna(0).astype(int)
     df["month"] = df["datetime"].dt.month.fillna(1).astype(int)
@@ -254,13 +266,14 @@ def prepare_df_for_model(df_raw):
     df["season"] = df["month"].apply(season_from_month)
 
     df["wind_power"] = df["wind_speed"] ** 2
-    df["humid_cloud"] = df["humidity"] * df["clouds"] / 100.0
+    df["humid_cloud"] = df["humidity"] * df.get("clouds", 0) / 100.0
+
+    if "RainOrNot" not in df.columns:
+        df["RainOrNot"] = ((df["rain_3h"] > 0) | (df["snow_3h"] > 0)).astype(int)
 
     features = []
     for f in MODEL_FEATURES:
-        if f in ["season", "city"]:
-            features.append(f)
-        elif f in df.columns:
+        if f in df.columns:
             features.append(f)
         else:
             df[f] = 0.0
@@ -359,7 +372,6 @@ def get_model_by_name(name, X=None, y=None):
             n_jobs=-1,
         )
         model = RandomForestClassifier(**default_params)
-        # GridSearchCV only if X and y provided
         if X is not None and y is not None:
             param_grid = {
                 "n_estimators": [200, 400],
@@ -376,7 +388,6 @@ def get_model_by_name(name, X=None, y=None):
                 verbose=0,
             )
             gs.fit(X, y)
-            # Return best estimator if improved, else default
             if hasattr(gs, "best_estimator_") and gs.best_score_ >= getattr(gs, "best_score_", 0):
                 return gs.best_estimator_
             else:
@@ -428,7 +439,7 @@ def get_model_by_name(name, X=None, y=None):
     if name in ("deep learning", "neural network", "mlp"):
         return KerasClassifier(
             build_fn=lambda: build_dl_model(X_all.shape[1]),
-            epochs=200,
+            epochs=300,
             batch_size=32,
             verbose=0,
         )
@@ -438,14 +449,21 @@ def get_model_by_name(name, X=None, y=None):
 
 def train_and_cache(model_name, X_all, y_all):
     key = model_name.lower()
+    if "preproc" in pipelines_cache:
+        preproc = pipelines_cache["preproc"]["preproc"]
+        num_cols = pipelines_cache["preproc"]["num_cols"]
+        cat_cols = pipelines_cache["preproc"]["cat_cols"]
+    else:
+        preproc, num_cols, cat_cols = build_preprocessor(X_all)
+        pipelines_cache["preproc"] = {
+            "preproc": preproc,
+            "num_cols": num_cols,
+            "cat_cols": cat_cols,
+        }
     if key in models_cache and key in pipelines_cache:
         return models_cache[key], pipelines_cache[key]
 
-    preproc, num_cols, cat_cols = build_preprocessor(X_all)
-
-    # For strong models, perform grid search on preprocessed data
     if key in ("random forest", "random_forest", "gradient boosting", "gradient_boosting"):
-        # Fit preproc to X_all, get np array for gridsearch
         X_proc = preproc.fit_transform(X_all)
         model = get_model_by_name(model_name, X_proc, y_all)
     else:
@@ -494,7 +512,6 @@ def train_blended_model(X_all, y_all):
     """
     Ensemble blending using several strong base models + Logistic Regression as meta-model.
     """
-    # Use grid search for base models
     preproc, num_cols, cat_cols = build_preprocessor(X_all)
     X_proc = preproc.fit_transform(X_all)
     rf_model = get_model_by_name("Random Forest", X_proc, y_all)
@@ -547,46 +564,40 @@ if os.path.exists(DATA_FILE):
         df_raw = pd.read_csv(DATA_FILE)
         print(f"Loaded {DATA_FILE}, rows={len(df_raw)}")
     except Exception as e:
-        print("Failed to load existing data file, rebuilding:", e)
-        df_raw = build_weather_dataset()
+        print("Failed to load existing data file")
 else:
-    print(f"{DATA_FILE} not found — building from API...")
-    df_raw = build_weather_dataset()
-
-# Advanced feature engineering
-
-# Add time-based and derived features before model preparation
-df_raw["temp_prev"] = df_raw["temp"].shift(1).fillna(df_raw["temp"].median())
-df_raw["humidity_prev"] = df_raw["humidity"].shift(1).fillna(df_raw["humidity"].median())
-df_raw["pressure_prev"] = df_raw["pressure"].shift(1).fillna(df_raw["pressure"].median())
-df_raw["pressure_change"] = df_raw["pressure"] - df_raw["pressure_prev"]
-df_raw["temp_trend_3h"] = df_raw["temp"].rolling(window=3, min_periods=1).mean()
-df_raw["humidity_trend_3h"] = df_raw["humidity"].rolling(window=3, min_periods=1).mean()
-df_raw["feels_diff"] = df_raw["feels_like"] - df_raw["temp"]
-df_raw["wind_humid_ratio"] = df_raw["wind_speed"] / (df_raw["humidity"] + 1)
-
-# Dew point approximation (in °C)
-df_raw["dew_point"] = df_raw["temp"] - ((100 - df_raw["humidity"]) / 5)
-
-# Temperature variability and trend features
-df_raw["temp_std_6h"] = df_raw["temp"].rolling(window=6, min_periods=1).std().fillna(0)
-df_raw["temp_trend_6h"] = df_raw["temp"].rolling(window=6, min_periods=1).mean()
-
-# Wind and pressure dynamics
-df_raw["wind_power_trend"] = df_raw["wind_speed"].rolling(window=3, min_periods=1).mean() ** 2
-df_raw["pressure_change_rate"] = df_raw["pressure"].diff().fillna(0)
-
-# Humidity dynamics
-df_raw["humidity_trend_6h"] = df_raw["humidity"].rolling(window=6, min_periods=1).mean()
-
-# Combined indicators
-df_raw["cloud_humidity_ratio"] = df_raw["clouds"] / (df_raw["humidity"] + 1)
-df_raw["temp_feels_gap"] = df_raw["feels_like"] - df_raw["temp"]
-
-# Replace NaNs that may appear due to rolling calculations
-df_raw = df_raw.fillna(0)
+    print(f"{DATA_FILE} not found")
 
 X_all, y_all, df_prepared = prepare_df_for_model(df_raw)
+
+for col in ["temp", "feels_like", "pressure", "humidity", "wind_speed", "wind_deg", "clouds"]:
+    df_prepared[col] = df_prepared[col].interpolate(method="linear").fillna(df_prepared[col].median())
+
+for col in ["rain_3h", "snow_3h", "pop"]:
+    df_prepared[col] = df_prepared[col].fillna(0.0)
+
+df_prepared["temp_prev"] = df_prepared["temp"].shift(1).fillna(0)
+df_prepared["humidity_prev"] = df_prepared["humidity"].shift(1).fillna(0)
+df_prepared["pressure_prev"] = df_prepared["pressure"].shift(1).fillna(0)
+df_prepared["pressure_change"] = df_prepared["pressure"] - df_prepared["pressure_prev"]
+
+df_prepared["temp_trend_3h"] = df_prepared["temp"].rolling(window=3, min_periods=1).mean()
+df_prepared["humidity_trend_3h"] = df_prepared["humidity"].rolling(window=3, min_periods=1).mean()
+df_prepared["temp_std_6h"] = df_prepared["temp"].rolling(window=6, min_periods=1).std().fillna(0)
+df_prepared["humidity_trend_6h"] = df_prepared["humidity"].rolling(window=6, min_periods=1).mean()
+
+df_prepared["feels_diff"] = df_prepared["feels_like"] - df_prepared["temp"]
+df_prepared["wind_humid_ratio"] = df_prepared["wind_speed"] / (df_prepared["humidity"] + 1)
+df_prepared["dew_point"] = df_prepared["temp"] - ((100 - df_prepared["humidity"]) / 5)
+df_prepared["wind_power_trend"] = df_prepared["wind_speed"].rolling(window=3, min_periods=1).mean() ** 2
+df_prepared["pressure_change_rate"] = df_prepared["pressure"].diff().fillna(0)
+df_prepared["cloud_humidity_ratio"] = df_prepared["clouds"] / (df_prepared["humidity"] + 1)
+df_prepared["temp_feels_gap"] = df_prepared["feels_like"] - df_prepared["temp"]
+
+df_prepared = df_prepared.fillna(0)
+
+X_all = df_prepared[MODEL_FEATURES].copy()
+y_all = df_prepared["RainOrNot"].copy()
 
 AVAILABLE_MODELS = [
     "Decision Tree",
@@ -610,26 +621,31 @@ def index():
 def predict_api():
     """
     Endpoint: accepts {"city": "...", "hours_ahead": 3, "model": "best" or "Random Forest"}
-    -> fetches forecast, runs model, returns rain_probability + accuracy.
-    If model='best', selects model with highest cached accuracy.
+    Fetches forecast, runs the selected model, and returns rain probability + model accuracy.
     """
     req = request.get_json(force=True)
     city = req.get("city")
     hours = float(req.get("hours_ahead", 3))
-    model_name = str(req.get("model", "Random Forest")).strip()
+    requested_model = str(req.get("model", "Random Forest")).strip()
 
-    if model_name.lower() in ("best", "auto", "auto (best model)"):
-        if models_cache:
-            best_model_key = max(
+    if requested_model.lower() in ("best", "auto", "auto (best model)"):
+        if "best" in models_cache:
+            selected_model_name = models_cache["best"]["used_model"]
+            model_label = "Best Model (Cached)"
+        elif models_cache:
+            best_item = max(
                 models_cache.items(),
-                key=lambda kv: kv[1]["metrics"].get("cv_accuracy", 0),
-            )[0]
-            used_model_name = best_model_key
+                key=lambda kv: kv[1]["metrics"].get("cv_accuracy", 0)
+            )
+            selected_model_name = best_item[0]
+            model_label = "Best Model"
+            models_cache["best"] = {**best_item[1], "used_model": selected_model_name}
         else:
-            used_model_name = "Random Forest"
-        model_name = "Best Model"
+            selected_model_name = "Random Forest"
+            model_label = "Best Model (Default: Random Forest)"
     else:
-        used_model_name = model_name
+        selected_model_name = requested_model
+        model_label = requested_model
 
     qlist = CITY_QUERIES.get(city, [f"{city},KZ"])
     geo = geocode_best(qlist)
@@ -639,13 +655,14 @@ def predict_api():
 
     data = fetch_forecast(lat, lon)
     if not data or "list" not in data:
-        return jsonify({"error": f"No forecast available for {city}"}), 400
+        return jsonify({"error": f"No forecast data available for '{city}'"}), 400
+    if not isinstance(data.get("list"), list) or not data["list"]:
+        return jsonify({"error": "Forecast data is empty or invalid."}), 400
 
-    target = pd.Timestamp.now() + pd.to_timedelta(hours, unit="h")
-    fl = pd.DataFrame(data["list"])
-    fl["datetime"] = pd.to_datetime(fl["dt_txt"])
-    idx = (fl["datetime"] - target).abs().argsort()[0]
-    nearest = fl.iloc[idx]
+    target_time = pd.Timestamp.now() + pd.to_timedelta(hours, unit="h")
+    forecast_df = pd.DataFrame(data["list"])
+    forecast_df["datetime"] = pd.to_datetime(forecast_df["dt_txt"])
+    nearest = forecast_df.iloc[(forecast_df["datetime"] - target_time).abs().argsort()[0]]
 
     rec = {
         "city": city,
@@ -656,59 +673,52 @@ def predict_api():
         "humidity": nearest["main"]["humidity"],
         "clouds": nearest["clouds"]["all"],
         "wind_speed": nearest["wind"]["speed"],
-        "weather_main": (
-            nearest["weather"][0]["main"] if nearest.get("weather") else None
-        ),
+        "weather_main": nearest["weather"][0]["main"] if nearest.get("weather") else "Unknown",
     }
-
     df_user = pd.DataFrame([rec])
     X_user, _, _ = prepare_df_for_model(df_user)
 
-    if used_model_name.lower() == "ensemble blending":
-        model_info = train_blended_model(X_all, y_all)
-        base_models, meta_model, preproc = model_info["pipeline"]
+    if selected_model_name.lower() == "ensemble blending":
+        try:
+            model_info = train_blended_model(X_all, y_all)
+            base_models, meta_model, preproc = model_info["pipeline"]
 
-        X_user_proc = preproc.transform(X_user)
-        meta_features = [m.predict_proba(X_user_proc)[:, 1][0] for _, m in base_models]
-        meta_input = np.array(meta_features).reshape(1, -1)
-        prob = float(meta_model.predict_proba(meta_input)[0][1])
+            X_user_proc = preproc.transform(X_user)
+            meta_features = [m.predict_proba(X_user_proc)[:, 1][0] for _, m in base_models]
+            meta_input = np.array(meta_features).reshape(1, -1)
+            prob = float(meta_model.predict_proba(meta_input)[0][1])
+            accuracy = model_info["metrics"].get("test_accuracy", None)
 
-        metrics = model_info["metrics"]
-        accuracy = metrics.get("test_accuracy", None)
-
-        return jsonify({
-            "model": "Ensemble Blending",
-            "used_model": "Blending Ensemble",
-            "city": city,
-            "datetime": rec["datetime"],
-            "rain_probability": round(prob * 100, 2),
-            "accuracy": round(accuracy * 100, 2) if accuracy else None,
-            "metrics": metrics,
-        })
-
-    try:
-        model_info, _ = train_and_cache(used_model_name, X_all, y_all)
-    except Exception as e:
-        return jsonify({"error": f"Training failed: {e}"}), 500
-
-    pipe = model_info["pipeline"]
+            return jsonify({
+                "model": "Ensemble Blending",
+                "used_model": "Blending Ensemble",
+                "city": city,
+                "datetime": rec["datetime"],
+                "rain_probability": round(prob * 100, 2),
+                "accuracy": round(accuracy * 100, 2) if accuracy else None,
+                "metrics": model_info["metrics"],
+            })
+        except Exception as e:
+            return jsonify({"error": f"Ensemble prediction failed: {e}"}), 500
 
     try:
+        model_info, _ = train_and_cache(selected_model_name, X_all, y_all)
+        pipe = model_info["pipeline"]
+
         if hasattr(pipe, "predict_proba"):
             prob = float(pipe.predict_proba(X_user)[0][1])
         else:
-            pred = pipe.predict(X_user)[0]
-            prob = float(pred)
+            prob = float(pipe.predict(X_user)[0])
     except Exception as e:
         return jsonify({"error": f"Prediction failed: {e}"}), 500
 
     metrics = model_info.get("metrics", {})
-    accuracy = metrics.get("test_accuracy", None) or metrics.get("cv_accuracy", None)
+    accuracy = metrics.get("test_accuracy") or metrics.get("cv_accuracy")
 
     return jsonify({
-        "model": model_name,
-        "used_model": used_model_name,
-        "is_best_model": model_name.lower().startswith("best"),
+        "model": model_label,
+        "used_model": selected_model_name,
+        "is_best_model": requested_model.lower().startswith("best"),
         "city": city,
         "datetime": rec["datetime"],
         "rain_probability": round(prob * 100, 2),
@@ -716,25 +726,25 @@ def predict_api():
         "metrics": metrics,
     })
 
-@app.route("/retrain", methods=["POST"])
-def retrain():
-    """
-    Force retrain of a given model or all models.
-    JSON: { "model": "Random Forest" } or { "model": "all" }
-    """
-    req = request.get_json(force=True)
-    model = req.get("model", "all")
-    if model == "all":
-        models_cache.clear()
-        pipelines_cache.clear()
-        return jsonify({"status": "cleared"}), 200
-    else:
-        k = model.lower()
-        models_cache.pop(k, None)
-        pipelines_cache.pop(k, None)
-        return jsonify({"status": f"cleared {model}"}), 200
-
-
 if __name__ == "__main__":
     print("Available models:", AVAILABLE_MODELS)
     app.run(debug=False, host="127.0.0.1", port=5000, threaded=False)
+# 127.0.0.1 - - [10/Nov/2025 22:09:09] "GET / HTTP/1.1" 200 -
+# 127.0.0.1 - - [10/Nov/2025 22:09:09] "GET /favicon.ico HTTP/1.1" 404 -
+# [Decision Tree] Train: 0.840, Test: 0.806, CV: 0.791
+# 127.0.0.1 - - [10/Nov/2025 22:09:13] "POST /predict HTTP/1.1" 200 -
+# [Random Forest] Train: 0.965, Test: 0.916, CV: 0.912
+# 127.0.0.1 - - [10/Nov/2025 22:09:42] "POST /predict HTTP/1.1" 200 -
+# [Gradient Boosting] Train: 0.882, Test: 0.874, CV: 0.866
+# 127.0.0.1 - - [10/Nov/2025 22:12:01] "POST /predict HTTP/1.1" 200 -
+# [Logistic Regression] Train: 0.824, Test: 0.823, CV: 0.822
+# 127.0.0.1 - - [10/Nov/2025 22:13:22] "POST /predict HTTP/1.1" 200 -
+# [SVM (RBF)] Train: 0.830, Test: 0.827, CV: 0.823
+# 127.0.0.1 - - [10/Nov/2025 22:14:42] "POST /predict HTTP/1.1" 200 -
+# [KNN] Train: 1.000, Test: 0.925, CV: 0.920
+# 127.0.0.1 - - [10/Nov/2025 22:14:50] "POST /predict HTTP/1.1" 200 -
+# [Deep Learning (MLP)] Train: 0.824, Test: 0.823, CV: 0.822
+# 127.0.0.1 - - [10/Nov/2025 22:15:05] "POST /predict HTTP/1.1" 200 -
+# [Blending Ensemble] Test Accuracy: 0.931
+# 127.0.0.1 - - [10/Nov/2025 22:17:29] "POST /predict HTTP/1.1" 200 -
+# 127.0.0.1 - - [10/Nov/2025 22:17:37] "POST /predict HTTP/1.1" 200 -
