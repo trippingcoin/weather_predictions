@@ -3,6 +3,7 @@ import os, time, requests
 import pandas as pd
 import numpy as np
 import warnings
+import joblib
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.compose import ColumnTransformer
@@ -14,13 +15,18 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.neighbors import KNeighborsClassifier
-from sklearn.model_selection import GridSearchCV
+from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
+from sklearn.decomposition import PCA
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout, BatchNormalization
 from dotenv import load_dotenv
 from sklearn.model_selection import StratifiedKFold, cross_val_score
 from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline as ImbPipeline
+from tensorflow.keras.callbacks import EarlyStopping
+from scipy.stats import randint, uniform
+
+
 
 
 warnings.filterwarnings("ignore")
@@ -35,6 +41,8 @@ if not API_KEY:
 
 # API_KEY = "cd59f6e78b8ec3e0d4b69f9e55d80e1c"
 DATA_FILE = "data/weather_data.csv"
+MODELS_DIR = "models"
+os.makedirs(MODELS_DIR, exist_ok=True)
 
 CITY_QUERIES = {
     "Astana": ["Astana,KZ", "Nur-Sultan,KZ", "Akmola,KZ"],
@@ -124,6 +132,20 @@ CITY_QUERIES.update(EUROPE_CAPITALS)
 models_cache = {}
 pipelines_cache = {}
 
+
+
+
+def save_model(name, model):
+    path = os.path.join(MODELS_DIR, f"{name.replace(' ', '_').lower()}.pkl")
+    joblib.dump(model, path)
+    print(f"[Saved] {name} → {path}")
+
+def load_model_if_exists(name):
+    path = os.path.join(MODELS_DIR, f"{name.replace(' ', '_').lower()}.pkl")
+    if os.path.exists(path):
+        print(f"[Loaded saved model] {path}")
+        return joblib.load(path)
+    return None
 
 def geocode_best(q_list):
     for q in q_list:
@@ -216,7 +238,7 @@ def prepare_df_for_model(df_raw):
         "snow": "snow_3h",
         "pres": "pressure",
         "temp": "temp",
-        "dwpt": "feels_like", 
+        "dwpt": "feels_like",
         "city": "city",
     }
     df = df.rename(columns=rename_map)
@@ -233,8 +255,7 @@ def prepare_df_for_model(df_raw):
     ]
     for c in num_cols:
         if c in df.columns:
-            df[c] = pd.to_numeric(df[c], errors="coerce")
-            df[c] = df[c].fillna(df[c].median())
+            df[c] = pd.to_numeric(df[c], errors="coerce").fillna(df[c].median())
         else:
             df[c] = 0.0
 
@@ -242,7 +263,7 @@ def prepare_df_for_model(df_raw):
         if c in df.columns:
             df[c] = df[c].fillna("Unknown").astype(str)
         else:
-            df[c] = "Unknown"
+            df[c] = pd.Series(["Unknown"] * len(df), index=df.index, dtype=str)
 
     df["hour"] = df["datetime"].dt.hour.fillna(0).astype(int)
     df["month"] = df["datetime"].dt.month.fillna(1).astype(int)
@@ -264,22 +285,36 @@ def prepare_df_for_model(df_raw):
         return "Autumn"
 
     df["season"] = df["month"].apply(season_from_month)
-
     df["wind_power"] = df["wind_speed"] ** 2
     df["humid_cloud"] = df["humidity"] * df.get("clouds", 0) / 100.0
+
+    df["temp_prev"] = df["temp"].shift(1).fillna(df["temp"].iloc[0])
+    df["humidity_prev"] = df["humidity"].shift(1).fillna(df["humidity"].iloc[0])
+    df["pressure_prev"] = df["pressure"].shift(1).fillna(df["pressure"].iloc[0])
+
+    df["pressure_change"] = df["pressure"] - df["pressure_prev"]
+    df["temp_change_3h"] = df["temp"] - df["temp"].shift(3).fillna(df["temp"].iloc[0])
+    df["humidity_change_3h"] = df["humidity"] - df["humidity"].shift(3).fillna(df["humidity"].iloc[0])
+    df["pressure_trend_12h"] = df["pressure"].rolling(window=12, min_periods=1).mean()
+    df["wind_power_change"] = df["wind_power"] - df["wind_power"].shift(1).fillna(0)
+    df["dew_point"] = df["temp"] - ((100 - df["humidity"]) / 5)
+    df["dew_point_diff"] = df["dew_point"] - df["feels_like"]
+
+    EXTRA_FEATURES = ["temp_change_3h", "humidity_change_3h", "pressure_trend_12h", "wind_power_change", "dew_point_diff"]
+    for f in EXTRA_FEATURES:
+        if f not in df.columns:
+            df[f] = 0.0
+        df[f] = df[f].fillna(0)
 
     if "RainOrNot" not in df.columns:
         df["RainOrNot"] = ((df["rain_3h"] > 0) | (df["snow_3h"] > 0)).astype(int)
 
-    features = []
-    for f in MODEL_FEATURES:
-        if f in df.columns:
-            features.append(f)
-        else:
+    all_features = MODEL_FEATURES + EXTRA_FEATURES
+    for f in all_features:
+        if f not in df.columns:
             df[f] = 0.0
-            features.append(f)
 
-    X = df[features].copy()
+    X = df[all_features].copy()
     y = df["RainOrNot"].copy() if "RainOrNot" in df.columns else None
 
     return X, y, df
@@ -289,9 +324,11 @@ def build_preprocessor(X_train):
     num_cols = X_train.select_dtypes(include=[np.number]).columns.tolist()
     cat_cols = [c for c in X_train.columns if c not in num_cols]
 
-    num_pipe = Pipeline(
-        [("imp", SimpleImputer(strategy="median")), ("sc", StandardScaler())]
-    )
+    num_pipe = Pipeline([
+        ("imp", SimpleImputer(strategy="median")),
+        ("sc", StandardScaler()),
+        ("pca", PCA(n_components=0.95))
+    ])
     try:
         cat_pipe = Pipeline(
             [
@@ -313,142 +350,226 @@ def build_preprocessor(X_train):
 
 
 def build_dl_model(input_dim):
-    model = Sequential(
-        [
-            Dense(256, activation="relu", input_dim=input_dim),
-            BatchNormalization(),
-            Dropout(0.4),
-            Dense(128, activation="relu"),
-            Dropout(0.3),
-            Dense(64, activation="relu"),
-            Dense(1, activation="sigmoid"),
-        ]
-    )
+    model = Sequential([
+        Dense(512, activation="relu", input_dim=input_dim),
+        Dropout(0.5),
+        Dense(256, activation="relu"),
+        Dropout(0.4),
+        Dense(128, activation="relu"),
+        Dense(1, activation="sigmoid")
+    ])
     model.compile(optimizer="adam", loss="binary_crossentropy", metrics=["accuracy"])
     return model
 
-
 def get_model_by_name(name, X=None, y=None):
     """
-    Returns a model by name. For Random Forest and Gradient Boosting,
-    performs GridSearchCV if X and y are provided, otherwise returns default.
+    Returns a tuned model by name.
+    Uses RandomizedSearchCV for hyperparameter optimization and saves best model to disk.
     """
     name = name.strip().lower()
 
     if name == "decision tree":
-        return DecisionTreeClassifier(
-            max_depth=10,
-            min_samples_split=5,
-            min_samples_leaf=3,
-            class_weight="balanced",
-            random_state=42,
-        )
+        cached = load_model_if_exists(name)
+        if cached:
+            return cached
+
+        base = DecisionTreeClassifier(class_weight="balanced", random_state=42)
+        if X is not None and y is not None:
+            param_dist = {
+                "max_depth": randint(6, 20),
+                "min_samples_split": randint(2, 10),
+                "min_samples_leaf": randint(1, 5),
+                "criterion": ["gini", "entropy"],
+            }
+            rs = RandomizedSearchCV(base, param_dist, n_iter=15, cv=3,
+                                    scoring="accuracy", n_jobs=-1, random_state=42)
+            rs.fit(X, y)
+            best = rs.best_estimator_
+            print(f"[Decision Tree] Best params: {rs.best_params_}")
+            save_model(name, best)
+            return best
+        return base
 
     if name in ("svm", "svm (rbf)"):
-        return SVC(
-            kernel="rbf",
-            C=2.0,
-            gamma="auto",
-            class_weight="balanced",
-            probability=True,
-            random_state=42,
-        )
+        cached = load_model_if_exists(name)
+        if cached:
+            return cached
+
+        base = SVC(kernel="rbf", class_weight="balanced", probability=True)
+        if X is not None and y is not None:
+            param_dist = {
+                "C": uniform(0.1, 10),
+                "gamma": ["scale", "auto", 0.1, 0.01, 0.001],
+            }
+            cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+            rs = RandomizedSearchCV(base, param_distributions=param_dist, n_iter=30,
+                                    cv=cv, scoring="accuracy", n_jobs=-1, random_state=42)
+            rs.fit(X, y)
+            best = rs.best_estimator_
+            print(f"[SVM] Best params: {rs.best_params_}")
+            save_model(name, best)
+            return best
+        return base
 
     if name in ("logistic regression", "logreg"):
-        return LogisticRegression(
-            solver="liblinear", max_iter=2000, class_weight="balanced", random_state=42
+        cached = load_model_if_exists(name)
+        if cached:
+            return cached
+
+        base = LogisticRegression(
+            solver="saga",           
+            class_weight="balanced",
+            max_iter=5000,           
+            n_jobs=-1,
+            random_state=42
         )
+
+        if X is not None and y is not None:
+            param_dist = {
+                "C": uniform(0.01, 20),                
+                "penalty": ["l1", "l2", "elasticnet"], 
+                "l1_ratio": uniform(0, 1),            
+            }
+            rs = RandomizedSearchCV(
+                base,
+                param_distributions=param_dist,
+                n_iter=50,      
+                cv=5,          
+                scoring="accuracy",
+                n_jobs=-1,
+                random_state=42
+            )
+            rs.fit(X, y)
+            best = rs.best_estimator_
+            print(f"[LogReg] Best params: {rs.best_params_}")
+            save_model(name, best)
+            return best
+
+        return base
 
     if name in ("random forest", "random_forest"):
-        default_params = dict(
-            n_estimators=400,
-            max_depth=14,
-            min_samples_split=6,
-            min_samples_leaf=4,
-            max_features="sqrt",
-            bootstrap=True,
-            class_weight="balanced_subsample",
-            random_state=42,
-            n_jobs=-1,
+        cached = load_model_if_exists(name)
+        if cached:
+            return cached
+
+        base = RandomForestClassifier(
+            class_weight="balanced_subsample", random_state=42, n_jobs=-1
         )
-        model = RandomForestClassifier(**default_params)
         if X is not None and y is not None:
-            param_grid = {
-                "n_estimators": [200, 400],
-                "max_depth": [10, 14, 18],
-                "min_samples_leaf": [2, 4],
+            param_dist = {
+                "n_estimators": randint(1000, 1500),
+                "max_depth": randint(8, 30),
+                "min_samples_leaf": randint(1, 5),
                 "max_features": ["sqrt", "log2"],
             }
-            gs = GridSearchCV(
-                RandomForestClassifier(**default_params),
-                param_grid,
-                cv=3,
-                scoring="accuracy",
-                n_jobs=-1,
-                verbose=0,
-            )
-            gs.fit(X, y)
-            if hasattr(gs, "best_estimator_") and gs.best_score_ >= getattr(gs, "best_score_", 0):
-                return gs.best_estimator_
-            else:
-                return model
-        else:
-            return model
+            rs = RandomizedSearchCV(base, param_dist, n_iter=50, cv=3,
+                                    scoring="accuracy", n_jobs=-1, random_state=42)
+            rs.fit(X, y)
+            best = rs.best_estimator_
+            print(f"[Random Forest] Best params: {rs.best_params_}")
+            save_model(name, best)
+            return best
+        return base
 
     if name in ("gradient boosting", "gradient_boosting"):
-        default_params = dict(
-            n_estimators=400,
-            learning_rate=0.05,
-            max_depth=4,
-            subsample=0.9,
-            min_samples_leaf=4,
-            random_state=42,
-        )
-        model = GradientBoostingClassifier(**default_params)
+        cached = load_model_if_exists(name)
+        if cached:
+            return cached
+
+        base = GradientBoostingClassifier(random_state=42)
         if X is not None and y is not None:
-            param_grid = {
-                "n_estimators": [200, 400],
-                "learning_rate": [0.03, 0.05, 0.1],
-                "max_depth": [3, 4, 6],
-                "subsample": [0.8, 0.9, 1.0],
+            param_dist = {
+                "n_estimators": randint(500, 1500),
+                "learning_rate": uniform(0.01, 0.3),
+                "max_depth": randint(3, 10),
+                "subsample": uniform(0.7, 0.3),
+                "max_features": ["sqrt", "log2", None]
             }
-            gs = GridSearchCV(
-                GradientBoostingClassifier(**default_params),
-                param_grid,
-                cv=3,
+            cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+            rs = RandomizedSearchCV(
+                base,
+                param_distributions=param_dist,
+                n_iter=50,
+                cv=cv,
                 scoring="accuracy",
                 n_jobs=-1,
-                verbose=0,
+                random_state=42
             )
-            gs.fit(X, y)
-            if hasattr(gs, "best_estimator_") and gs.best_score_ >= getattr(gs, "best_score_", 0):
-                return gs.best_estimator_
-            else:
-                return model
-        else:
-            return model
+            rs.fit(X, y)
+            best = rs.best_estimator_
+            print(f"[Gradient Boosting] Best params: {rs.best_params_}")
+            save_model(name, best)
+            return best
+        return base
 
     if name in ("knn", "k-nearest neighbors"):
-        return KNeighborsClassifier(
-            n_neighbors=10,
-            weights="distance",
-            metric="manhattan",
-            n_jobs=-1,
-        )
+        cached = load_model_if_exists(name)
+        if cached:
+            return cached
+
+        base = KNeighborsClassifier(n_jobs=-1)
+        if X is not None and y is not None:
+            param_dist = {
+                "n_neighbors": randint(3, 50),
+                "weights": ["uniform", "distance"],
+                "metric": ["euclidean", "manhattan", "minkowski"],
+                "algorithm": ["auto", "ball_tree", "kd_tree", "brute"]
+            }
+            cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+            rs = RandomizedSearchCV(base, param_distributions=param_dist, n_iter=50,
+                                    cv=cv, scoring="accuracy", n_jobs=-1, random_state=42)
+            rs.fit(X, y)
+            best = rs.best_estimator_
+            print(f"[KNN] Best params: {rs.best_params_}")
+            save_model(name, best)
+            return best
+        return base
 
     if name in ("deep learning", "neural network", "mlp"):
-        return KerasClassifier(
+        model = KerasClassifier(
             build_fn=lambda: build_dl_model(X_all.shape[1]),
             epochs=300,
             batch_size=32,
             verbose=0,
+            callbacks=[EarlyStopping(patience=10, restore_best_weights=True)]
         )
+        return model
 
     return LogisticRegression(max_iter=1000, class_weight="balanced", random_state=42)
 
-
 def train_and_cache(model_name, X_all, y_all):
     key = model_name.lower()
+    models_dir = "models"
+    if not os.path.exists(models_dir):
+        os.makedirs(models_dir)
+    model_file = os.path.join(models_dir, f"{key}_model.pkl")
+    metrics_file = os.path.join(models_dir, f"{key}_metrics.pkl")
+
+    if os.path.exists(model_file) and os.path.exists(metrics_file):
+        try:
+            loaded_pipe = joblib.load(model_file)
+            loaded_metrics = joblib.load(metrics_file)
+            models_cache[key] = {"pipeline": loaded_pipe, "metrics": loaded_metrics}
+            if "preproc" in pipelines_cache:
+                preproc = pipelines_cache["preproc"]["preproc"]
+                num_cols = pipelines_cache["preproc"]["num_cols"]
+                cat_cols = pipelines_cache["preproc"]["cat_cols"]
+            else:
+                preproc, num_cols, cat_cols = build_preprocessor(X_all)
+                pipelines_cache["preproc"] = {
+                    "preproc": preproc,
+                    "num_cols": num_cols,
+                    "cat_cols": cat_cols,
+                }
+            pipelines_cache[key] = {
+                "preproc": preproc,
+                "num_cols": num_cols,
+                "cat_cols": cat_cols,
+            }
+            return models_cache[key], pipelines_cache[key]
+        except Exception as e:
+            print(f"Failed to load cached model for {key}: {e}")
+
     if "preproc" in pipelines_cache:
         preproc = pipelines_cache["preproc"]["preproc"]
         num_cols = pipelines_cache["preproc"]["num_cols"]
@@ -471,7 +592,7 @@ def train_and_cache(model_name, X_all, y_all):
 
     pipe = ImbPipeline([
         ("pre", preproc),
-        ("smote", SMOTE(random_state=42, sampling_strategy=0.6)),
+        ("smote", SMOTE(random_state=42, sampling_strategy=0.9)),
         ("clf", model),
     ])
 
@@ -506,6 +627,13 @@ def train_and_cache(model_name, X_all, y_all):
         "num_cols": num_cols,
         "cat_cols": cat_cols,
     }
+
+    try:
+        joblib.dump(pipe, model_file)
+        joblib.dump(metrics, metrics_file)
+    except Exception as e:
+        print(f"Failed to save model or metrics for {key}: {e}")
+
     return models_cache[key], pipelines_cache[key]
 
 def train_blended_model(X_all, y_all):
@@ -570,33 +698,17 @@ else:
 
 X_all, y_all, df_prepared = prepare_df_for_model(df_raw)
 
-for col in ["temp", "feels_like", "pressure", "humidity", "wind_speed", "wind_deg", "clouds"]:
+time_cols = ["temp", "feels_like", "pressure", "humidity", "wind_speed", "wind_deg", "clouds"]
+for col in time_cols:
     df_prepared[col] = df_prepared[col].interpolate(method="linear").fillna(df_prepared[col].median())
 
 for col in ["rain_3h", "snow_3h", "pop"]:
     df_prepared[col] = df_prepared[col].fillna(0.0)
 
-df_prepared["temp_prev"] = df_prepared["temp"].shift(1).fillna(0)
-df_prepared["humidity_prev"] = df_prepared["humidity"].shift(1).fillna(0)
-df_prepared["pressure_prev"] = df_prepared["pressure"].shift(1).fillna(0)
-df_prepared["pressure_change"] = df_prepared["pressure"] - df_prepared["pressure_prev"]
-
-df_prepared["temp_trend_3h"] = df_prepared["temp"].rolling(window=3, min_periods=1).mean()
-df_prepared["humidity_trend_3h"] = df_prepared["humidity"].rolling(window=3, min_periods=1).mean()
-df_prepared["temp_std_6h"] = df_prepared["temp"].rolling(window=6, min_periods=1).std().fillna(0)
-df_prepared["humidity_trend_6h"] = df_prepared["humidity"].rolling(window=6, min_periods=1).mean()
-
-df_prepared["feels_diff"] = df_prepared["feels_like"] - df_prepared["temp"]
-df_prepared["wind_humid_ratio"] = df_prepared["wind_speed"] / (df_prepared["humidity"] + 1)
-df_prepared["dew_point"] = df_prepared["temp"] - ((100 - df_prepared["humidity"]) / 5)
-df_prepared["wind_power_trend"] = df_prepared["wind_speed"].rolling(window=3, min_periods=1).mean() ** 2
-df_prepared["pressure_change_rate"] = df_prepared["pressure"].diff().fillna(0)
-df_prepared["cloud_humidity_ratio"] = df_prepared["clouds"] / (df_prepared["humidity"] + 1)
-df_prepared["temp_feels_gap"] = df_prepared["feels_like"] - df_prepared["temp"]
-
 df_prepared = df_prepared.fillna(0)
 
-X_all = df_prepared[MODEL_FEATURES].copy()
+EXTRA_FEATURES = ["temp_change_3h", "humidity_change_3h", "pressure_trend_12h", "wind_power_change", "dew_point_diff"]
+X_all = df_prepared[MODEL_FEATURES + EXTRA_FEATURES].copy()
 y_all = df_prepared["RainOrNot"].copy()
 
 AVAILABLE_MODELS = [
