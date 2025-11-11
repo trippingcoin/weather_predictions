@@ -25,6 +25,9 @@ from imblearn.over_sampling import SMOTE
 from imblearn.pipeline import Pipeline as ImbPipeline
 from tensorflow.keras.callbacks import EarlyStopping
 from scipy.stats import randint, uniform
+import io
+import base64
+from flask import send_file
 
 
 
@@ -134,6 +137,58 @@ pipelines_cache = {}
 
 
 
+
+def plot_feature_importance_to_png(model_pipeline, X, y=None, top_n=20):
+    """
+    Возвращает график важности признаков как PNG в памяти (BytesIO)
+    """
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    from sklearn.inspection import permutation_importance
+
+    plt.switch_backend('Agg')  
+
+    clf = getattr(model_pipeline, "named_steps", {}).get("clf", model_pipeline)
+
+    if hasattr(clf, "feature_importances_"):
+        importances = clf.feature_importances_
+        df = pd.DataFrame({"feature": X.columns, "importance": importances})
+        df = df.sort_values("importance", ascending=False).head(top_n)
+        title = "Top Feature Importances (Tree-based)"
+        x_col, y_col = "importance", "feature"
+        palette = "viridis"
+
+    elif hasattr(clf, "coef_"):
+        coefs = clf.coef_.ravel()
+        df = pd.DataFrame({"feature": X.columns, "coefficient": coefs})
+        df = df.sort_values("coefficient", key=abs, ascending=False).head(top_n)
+        title = "Top Feature Coefficients (LogReg)"
+        x_col, y_col = "coefficient", "feature"
+        palette = "coolwarm"
+
+    elif y is not None:
+        result = permutation_importance(clf, X, y, n_repeats=10, random_state=42, n_jobs=-1)
+        df = pd.DataFrame({"feature": X.columns, "importance": result.importances_mean})
+        df = df.sort_values("importance", ascending=False).head(top_n)
+        title = "Top Permutation Importances"
+        x_col, y_col = "importance", "feature"
+        palette = "magma"
+
+    else:
+        raise ValueError("Cannot determine feature importance for this model.")
+
+    plt.figure(figsize=(10, 6))
+    sns.barplot(x=x_col, y=y_col, data=df, palette=palette)
+    plt.title(title)
+    plt.xlabel(x_col)
+    plt.ylabel(y_col)
+    plt.tight_layout()
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png")
+    plt.close()
+    buf.seek(0)
+    return buf
 
 def save_model(name, model):
     path = os.path.join(MODELS_DIR, f"{name.replace(' ', '_').lower()}.pkl")
@@ -419,23 +474,26 @@ def get_model_by_name(name, X=None, y=None):
         base = LogisticRegression(
             solver="saga",           
             class_weight="balanced",
-            max_iter=5000,           
+            max_iter=8000,           
             n_jobs=-1,
             random_state=42
         )
 
         if X is not None and y is not None:
-            param_dist = {
-                "C": uniform(0.01, 20),                
-                "penalty": ["l1", "l2", "elasticnet"], 
-                "l1_ratio": uniform(0, 1),            
-            }
+            param_dist = [
+                {"penalty": ["l1"], "C": uniform(0.001, 30)},
+                {"penalty": ["l2"], "C": uniform(0.001, 30)},
+                {"penalty": ["elasticnet"], "C": uniform(0.001, 30), "l1_ratio": uniform(0, 1)}
+            ]
+
+            cv = StratifiedKFold(n_splits=7, shuffle=True, random_state=42)
+
             rs = RandomizedSearchCV(
                 base,
                 param_distributions=param_dist,
-                n_iter=50,      
+                n_iter=80,      
                 cv=5,          
-                scoring="accuracy",
+                scoring="f1",
                 n_jobs=-1,
                 random_state=42
             )
@@ -508,21 +566,26 @@ def get_model_by_name(name, X=None, y=None):
             return cached
 
         base = KNeighborsClassifier(n_jobs=-1)
+
+        # If X and y are provided, perform hyperparameter search
         if X is not None and y is not None:
             param_dist = {
-                "n_neighbors": randint(3, 50),
+                "n_neighbors": randint(3, 150), 
                 "weights": ["uniform", "distance"],
-                "metric": ["euclidean", "manhattan", "minkowski"],
-                "algorithm": ["auto", "ball_tree", "kd_tree", "brute"]
+                "metric": ["euclidean", "manhattan", "minkowski", "chebyshev", "seuclidean"],
+                "algorithm": ["auto", "ball_tree", "kd_tree", "brute"],
+                "leaf_size": randint(10, 60),
+                "p": [1, 2],  
             }
-            cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
-            rs = RandomizedSearchCV(base, param_distributions=param_dist, n_iter=50,
-                                    cv=cv, scoring="accuracy", n_jobs=-1, random_state=42)
+            cv = StratifiedKFold(n_splits=7, shuffle=True, random_state=42)
+            rs = RandomizedSearchCV(base, param_distributions=param_dist, n_iter=120,
+                                    cv=cv, scoring="accuracy", n_jobs=-1, random_state=42, verbose=2)
             rs.fit(X, y)
             best = rs.best_estimator_
             print(f"[KNN] Best params: {rs.best_params_}")
             save_model(name, best)
             return best
+
         return base
 
     if name in ("deep learning", "neural network", "mlp"):
@@ -584,15 +647,13 @@ def train_and_cache(model_name, X_all, y_all):
     if key in models_cache and key in pipelines_cache:
         return models_cache[key], pipelines_cache[key]
 
-    if key in ("random forest", "random_forest", "gradient boosting", "gradient_boosting"):
-        X_proc = preproc.fit_transform(X_all)
-        model = get_model_by_name(model_name, X_proc, y_all)
-    else:
-        model = get_model_by_name(model_name)
+    X_proc = preproc.fit_transform(X_all)
+    model = get_model_by_name(model_name, X_proc, y_all)
+
 
     pipe = ImbPipeline([
         ("pre", preproc),
-        ("smote", SMOTE(random_state=42, sampling_strategy=0.9)),
+        ("smote", SMOTE(random_state=42, sampling_strategy=1.0)),
         ("clf", model),
     ])
 
