@@ -29,6 +29,8 @@ import io
 from sklearn.inspection import permutation_importance
 import matplotlib.pyplot as plt
 import seaborn as sns
+from sklearn.metrics import confusion_matrix, ConfusionMatrixDisplay
+
 
 
 
@@ -140,65 +142,154 @@ pipelines_cache = {}
 
 
 
-
-def plot_feature_importance(model_pipeline, X, y=None, top_n=20, save_path=None):
+def plot_model_metrics(models_cache, save_path="model_metrics_overview.png"):
     """
-    Строит график важности признаков (bar chart) для любой модели.
-    - model_pipeline: обученный пайплайн или модель
-    - X: DataFrame признаков
-    - y: Series меток (только для permutation importance)
-    - top_n: сколько топ признаков показывать
-    - save_path: если указан, сохраняет график в файл
-    Возвращает BytesIO с PNG, если save_path=None
+    Строит сравнительные графики (bar charts) для всех моделей:
+    Accuracy (Train/Test/CV), F1, Precision, Recall.
+    Сохраняет всё в один PNG файл.
     """
-    plt.switch_backend('Agg')
-    
-    clf = getattr(model_pipeline, "named_steps", {}).get("clf", model_pipeline)
-    
-    if hasattr(clf, "feature_importances_"):  
-        importances = clf.feature_importances_
-        df = pd.DataFrame({"feature": X.columns, "importance": importances})
-        df = df.sort_values("importance", ascending=False).head(top_n)
-        title = "Top Feature Importances (Tree-based)"
-        x_col, y_col = "importance", "feature"
-        palette = "viridis"
+    if not models_cache:
+        print("No trained models found in cache.")
+        return
 
-    elif hasattr(clf, "coef_"):  
-        coefs = clf.coef_.ravel()
-        df = pd.DataFrame({"feature": X.columns, "coefficient": coefs})
-        df = df.sort_values("coefficient", key=abs, ascending=False).head(top_n)
-        title = "Top Feature Coefficients (Linear)"
-        x_col, y_col = "coefficient", "feature"
-        palette = "coolwarm"
+    # Собираем метрики в таблицу
+    data = []
+    for name, info in models_cache.items():
+        metrics = info.get("metrics", {})
+        if not metrics:
+            continue
+        data.append({
+            "Model": name,
+            "Train Accuracy": metrics.get("train_accuracy", 0),
+            "Test Accuracy": metrics.get("test_accuracy", 0),
+            "CV Accuracy": metrics.get("cv_accuracy", 0),
+            "Precision": metrics.get("precision", 0),
+            "Recall": metrics.get("recall", 0),
+            "F1": metrics.get("f1", 0),
+        })
 
-    elif y is not None:  
-        result = permutation_importance(clf, X, y, n_repeats=10, random_state=42, n_jobs=-1)
-        df = pd.DataFrame({"feature": X.columns, "importance": result.importances_mean})
-        df = df.sort_values("importance", ascending=False).head(top_n)
-        title = "Top Permutation Importances"
-        x_col, y_col = "importance", "feature"
-        palette = "magma"
+    df = pd.DataFrame(data)
+    df = df.sort_values("Test Accuracy", ascending=False)
+
+    # --- Визуализация ---
+    sns.set(style="whitegrid")
+    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    fig.suptitle("📊 Model Performance Comparison", fontsize=16, fontweight="bold")
+
+    # Accuracy (Train/Test/CV)
+    df_melt_acc = df.melt(id_vars="Model", value_vars=["Train Accuracy", "Test Accuracy", "CV Accuracy"], var_name="Type", value_name="Accuracy")
+    sns.barplot(ax=axes[0,0], data=df_melt_acc, x="Model", y="Accuracy", hue="Type", palette="viridis")
+    axes[0,0].set_title("Accuracy (Train/Test/CV)")
+    axes[0,0].tick_params(axis="x", rotation=45)
+
+    # F1
+    sns.barplot(ax=axes[0,1], data=df, x="Model", y="F1", palette="coolwarm")
+    axes[0,1].set_title("F1 Score")
+    axes[0,1].tick_params(axis="x", rotation=45)
+
+    # Precision
+    sns.barplot(ax=axes[1,0], data=df, x="Model", y="Precision", palette="mako")
+    axes[1,0].set_title("Precision")
+    axes[1,0].tick_params(axis="x", rotation=45)
+
+    # Recall
+    sns.barplot(ax=axes[1,1], data=df, x="Model", y="Recall", palette="rocket")
+    axes[1,1].set_title("Recall")
+    axes[1,1].tick_params(axis="x", rotation=45)
+
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.savefig(save_path, dpi=300)
+    plt.close()
+    print(f"[Saved metrics overview chart] {save_path}")
+
+def generate_full_report(models_cache, X_all, y_all, preproc, save_dir="reports"):
+    """
+    Создает 4 визуализации:
+    1. Correlation heatmap (взаимосвязь признаков)
+    2. Feature importance (Random Forest)
+    3. Model comparison (Accuracy/F1)
+    4. Confusion matrix (лучшая модель)
+    Сохраняет все в PNG.
+    """
+    os.makedirs(save_dir, exist_ok=True)
+
+    # --- Figure 1: Correlation heatmap ---
+    corr_path = os.path.join(save_dir, "figure1_correlation_heatmap.png")
+
+    numeric_X = X_all.select_dtypes(include=[np.number])
+
+    plt.figure(figsize=(10, 8))
+    sns.heatmap(numeric_X.corr(), cmap="coolwarm", center=0, annot=False)
+    plt.title("Figure 1: Correlation heatmap (feature relationships)")
+    plt.tight_layout()
+    plt.savefig(corr_path, dpi=300)
+    plt.close()
+    print(f"[Saved] {corr_path}")
+
+    # --- Figure 2: Feature importance (Random Forest) ---
+    rf_model_info = models_cache.get("random forest") or models_cache.get("random_forest")
+    if rf_model_info:
+        rf_pipeline = rf_model_info["pipeline"]
+        imp_path = os.path.join(save_dir, "figure2_rf_importance.png")
+        plot_feature_importance(rf_pipeline.named_steps["clf"], X_all, y_all, top_n=15, save_path=imp_path)
     else:
-        raise ValueError("Cannot determine feature importance for this model.")
+        print("Random Forest model not found in cache — skipping feature importance plot.")
+
+    # --- Figure 3: Model comparison ---
+    comp_path = os.path.join(save_dir, "figure3_model_comparison.png")
+    data = []
+    for name, info in models_cache.items():
+        m = info.get("metrics", {})
+        if not m:
+            continue
+        data.append({
+            "Model": name.title(),
+            "Accuracy": m.get("test_accuracy", 0),
+            "F1": m.get("f1", 0),
+        })
+
+    if data:  
+        df = pd.DataFrame(data).sort_values("Accuracy", ascending=False)
+        plt.figure(figsize=(10, 6))
+        df_melt = df.melt(id_vars="Model", value_vars=["Accuracy", "F1"], var_name="Metric", value_name="Score")
+        sns.barplot(data=df_melt, x="Model", y="Score", hue="Metric", palette="viridis")
+        plt.title("Figure 3: Model comparison (Accuracy & F1)")
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        plt.savefig(comp_path, dpi=300)
+        plt.close()
+        print(f"[Saved] {comp_path}")
+    else:
+        print("No model metrics found — skipping model comparison and confusion matrix.")
+        return  
 
     plt.figure(figsize=(10, 6))
-    sns.barplot(x=x_col, y=y_col, data=df, palette=palette)
-    plt.title(title)
-    plt.xlabel(x_col)
-    plt.ylabel(y_col)
+    df_melt = df.melt(id_vars="Model", value_vars=["Accuracy", "F1"], var_name="Metric", value_name="Score")
+    sns.barplot(data=df_melt, x="Model", y="Score", hue="Metric", palette="viridis")
+    plt.title("Figure 3: Model comparison (Accuracy & F1)")
+    plt.xticks(rotation=45)
     plt.tight_layout()
+    plt.savefig(comp_path, dpi=300)
+    plt.close()
+    print(f"[Saved] {comp_path}")
 
-    if save_path:
-        plt.savefig(save_path, format="png")
-        plt.close()
-        print(f"[Saved plot] {save_path}")
-        return save_path
-    else:
-        buf = io.BytesIO()
-        plt.savefig(buf, format="png")
-        plt.close()
-        buf.seek(0)
-        return buf
+    # --- Figure 4: Confusion matrix for best model ---
+    best_name, best_info = max(models_cache.items(), key=lambda kv: kv[1]["metrics"].get("test_accuracy", 0))
+    best_pipe = best_info["pipeline"]
+    X_train, X_test, y_train, y_test = train_test_split(X_all, y_all, test_size=0.2, stratify=y_all, random_state=42)
+    y_pred = best_pipe.predict(X_test)
+
+    cm = confusion_matrix(y_test, y_pred)
+    cm_path = os.path.join(save_dir, "figure4_confusion_matrix.png")
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm)
+    disp.plot(cmap="Blues", colorbar=False)
+    plt.title(f"Figure 4: Confusion matrix for best model ({best_name.title()})")
+    plt.tight_layout()
+    plt.savefig(cm_path, dpi=300)
+    plt.close()
+    print(f"[Saved] {cm_path}")
+
+    print("\nAll 4 figures generated in:", save_dir)
 
 def save_model(name, model):
     path = os.path.join(MODELS_DIR, f"{name.replace(' ', '_').lower()}.pkl")
@@ -908,6 +999,13 @@ def predict_api():
         "accuracy": round(accuracy * 100, 2) if accuracy is not None else None,
         "metrics": metrics,
     })
+
+if models_cache:
+    plot_model_metrics(models_cache)
+    preproc = pipelines_cache.get("preproc", {}).get("preproc")
+    generate_full_report(models_cache, X_all, y_all, preproc)
+else:
+    print("No models trained yet — skipping plots.")
 
 if __name__ == "__main__":
     print("Available models:", AVAILABLE_MODELS)
