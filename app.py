@@ -141,6 +141,55 @@ pipelines_cache = {}
 
 
 
+def plot_feature_importance(model, X, y=None, top_n=15, save_path="feature_importance.png"):
+    """
+    Строит бар-чарт важности признаков для RandomForest или GradientBoosting.
+    """
+    if hasattr(model, "feature_importances_"):
+        # Основной вариант для деревьев
+        importances = model.feature_importances_
+        features = getattr(model, "feature_names_in_", None)
+        if features is None and hasattr(X, "columns"):
+            features = X.columns
+        elif features is None:
+            features = [f"f{i}" for i in range(len(importances))]
+
+        if len(importances) != len(features):
+            print(f"[Warning] len(importances)={len(importances)} != len(features)={len(features)}")
+            indices = np.argsort(importances)[::-1][:top_n]
+            features = [f"f{i}" for i in indices]
+            importances = importances[indices]
+
+        df = pd.DataFrame({"feature": features, "importance": importances})
+        df = df.sort_values("importance", ascending=False).head(top_n)
+
+        plt.figure(figsize=(10, 6))
+        sns.barplot(x="importance", y="feature", data=df, palette="viridis")
+        plt.title("Figure 2: Feature Importances")
+        plt.tight_layout()
+        plt.savefig(save_path, dpi=300)
+        plt.close()
+        print(f"[Saved feature importance chart] {save_path}")
+
+    elif y is not None:
+        # Permutation importance как fallback
+        from sklearn.inspection import permutation_importance
+        result = permutation_importance(model, X, y, n_repeats=10, random_state=42, n_jobs=-1)
+        importances = result.importances_mean
+        features = X.columns
+        df = pd.DataFrame({"feature": features, "importance": importances})
+        df = df.sort_values("importance", ascending=False).head(top_n)
+
+        plt.figure(figsize=(10,6))
+        sns.barplot(x="importance", y="feature", data=df, palette="viridis")
+        plt.title("Figure 2: Permutation Feature Importances")
+        plt.tight_layout()
+        plt.savefig(save_path, dpi=300)
+        plt.close()
+        print(f"[Saved permutation importance chart] {save_path}")
+
+    else:
+        print("Cannot compute feature importance for this model.")
 
 def plot_model_metrics(models_cache, save_path="model_metrics_overview.png"):
     """
@@ -215,9 +264,7 @@ def generate_full_report(models_cache, X_all, y_all, preproc, save_dir="reports"
 
     # --- Figure 1: Correlation heatmap ---
     corr_path = os.path.join(save_dir, "figure1_correlation_heatmap.png")
-
     numeric_X = X_all.select_dtypes(include=[np.number])
-
     plt.figure(figsize=(10, 8))
     sns.heatmap(numeric_X.corr(), cmap="coolwarm", center=0, annot=False)
     plt.title("Figure 1: Correlation heatmap (feature relationships)")
@@ -247,7 +294,6 @@ def generate_full_report(models_cache, X_all, y_all, preproc, save_dir="reports"
             "Accuracy": m.get("test_accuracy", 0),
             "F1": m.get("f1", 0),
         })
-
     if data:  
         df = pd.DataFrame(data).sort_values("Accuracy", ascending=False)
         plt.figure(figsize=(10, 6))
@@ -260,18 +306,8 @@ def generate_full_report(models_cache, X_all, y_all, preproc, save_dir="reports"
         plt.close()
         print(f"[Saved] {comp_path}")
     else:
-        print("No model metrics found — skipping model comparison and confusion matrix.")
+        print("No model metrics found — skipping model comparison.")
         return  
-
-    plt.figure(figsize=(10, 6))
-    df_melt = df.melt(id_vars="Model", value_vars=["Accuracy", "F1"], var_name="Metric", value_name="Score")
-    sns.barplot(data=df_melt, x="Model", y="Score", hue="Metric", palette="viridis")
-    plt.title("Figure 3: Model comparison (Accuracy & F1)")
-    plt.xticks(rotation=45)
-    plt.tight_layout()
-    plt.savefig(comp_path, dpi=300)
-    plt.close()
-    print(f"[Saved] {comp_path}")
 
     # --- Figure 4: Confusion matrix for best model ---
     best_name, best_info = max(models_cache.items(), key=lambda kv: kv[1]["metrics"].get("test_accuracy", 0))
@@ -573,31 +609,30 @@ def get_model_by_name(name, X=None, y=None):
             return cached
 
         base = LogisticRegression(
-            solver="saga",           
+            solver="saga",
             class_weight="balanced",
-            max_iter=8000,           
+            max_iter=3000,  
             n_jobs=-1,
             random_state=42
         )
 
         if X is not None and y is not None:
             param_dist = [
-                {"penalty": ["l1"], "C": uniform(0.001, 30)},
-                {"penalty": ["l2"], "C": uniform(0.001, 30)},
-                {"penalty": ["elasticnet"], "C": uniform(0.001, 30), "l1_ratio": uniform(0, 1)}
+                {"penalty": ["l1", "l2"], "C": uniform(0.1, 5)},  
             ]
 
-            cv = StratifiedKFold(n_splits=7, shuffle=True, random_state=42)
-
+            cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
             rs = RandomizedSearchCV(
                 base,
                 param_distributions=param_dist,
-                n_iter=80,      
-                cv=5,          
+                n_iter=10,  
+                cv=cv,
                 scoring="f1",
                 n_jobs=-1,
-                random_state=42
+                random_state=42,
+                verbose=2
             )
+
             rs.fit(X, y)
             best = rs.best_estimator_
             print(f"[LogReg] Best params: {rs.best_params_}")
@@ -609,11 +644,14 @@ def get_model_by_name(name, X=None, y=None):
     if name in ("random forest", "random_forest"):
         cached = load_model_if_exists(name)
         if cached:
+            print("[Random Forest] Loaded cached model")
             return cached
 
+        print("[Random Forest] Starting hyperparameter tuning...")
         base = RandomForestClassifier(
             class_weight="balanced_subsample", random_state=42, n_jobs=-1
         )
+
         if X is not None and y is not None:
             param_dist = {
                 "n_estimators": randint(1000, 1500),
@@ -627,28 +665,33 @@ def get_model_by_name(name, X=None, y=None):
             best = rs.best_estimator_
             print(f"[Random Forest] Best params: {rs.best_params_}")
             save_model(name, best)
+            print("[Random Forest] Model saved")
             return best
+
         return base
 
     if name in ("gradient boosting", "gradient_boosting"):
         cached = load_model_if_exists(name)
         if cached:
+            print("[Gradient Boosting] Loaded cached model")
             return cached
 
+        print("[Gradient Boosting] Starting hyperparameter tuning...")
         base = GradientBoostingClassifier(random_state=42)
+
         if X is not None and y is not None:
             param_dist = {
-                "n_estimators": randint(500, 1500),
-                "learning_rate": uniform(0.01, 0.3),
-                "max_depth": randint(3, 10),
+                "n_estimators": randint(500, 1000),
+                "learning_rate": uniform(0.05, 0.15),
+                "max_depth": randint(3, 7),
                 "subsample": uniform(0.7, 0.3),
                 "max_features": ["sqrt", "log2", None]
             }
-            cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+            cv = StratifiedKFold(n_splits=3, shuffle=True, random_state=42)
             rs = RandomizedSearchCV(
                 base,
                 param_distributions=param_dist,
-                n_iter=50,
+                n_iter=25,
                 cv=cv,
                 scoring="accuracy",
                 n_jobs=-1,
@@ -658,7 +701,9 @@ def get_model_by_name(name, X=None, y=None):
             best = rs.best_estimator_
             print(f"[Gradient Boosting] Best params: {rs.best_params_}")
             save_model(name, best)
+            print("[Gradient Boosting] Model saved")
             return best
+
         return base
 
     if name in ("knn", "k-nearest neighbors"):
@@ -989,6 +1034,11 @@ def predict_api():
     metrics = model_info.get("metrics", {})
     accuracy = metrics.get("test_accuracy") or metrics.get("cv_accuracy")
 
+    plot_model_metrics(models_cache)
+
+    preproc = pipelines_cache.get("preproc", {}).get("preproc")
+    generate_full_report(models_cache, X_all, y_all, preproc)
+
     return jsonify({
         "model": model_label,
         "used_model": selected_model_name,
@@ -1000,12 +1050,6 @@ def predict_api():
         "metrics": metrics,
     })
 
-if models_cache:
-    plot_model_metrics(models_cache)
-    preproc = pipelines_cache.get("preproc", {}).get("preproc")
-    generate_full_report(models_cache, X_all, y_all, preproc)
-else:
-    print("No models trained yet — skipping plots.")
 
 if __name__ == "__main__":
     print("Available models:", AVAILABLE_MODELS)
