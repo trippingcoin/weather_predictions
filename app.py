@@ -15,7 +15,7 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.svm import SVC
 from sklearn.ensemble import RandomForestClassifier, GradientBoostingClassifier
 from sklearn.neighbors import KNeighborsClassifier
-from sklearn.model_selection import GridSearchCV, RandomizedSearchCV
+from sklearn.model_selection import RandomizedSearchCV
 from sklearn.decomposition import PCA
 from tensorflow.keras.models import Sequential
 from tensorflow.keras.layers import Dense, Dropout, BatchNormalization
@@ -26,8 +26,10 @@ from imblearn.pipeline import Pipeline as ImbPipeline
 from tensorflow.keras.callbacks import EarlyStopping
 from scipy.stats import randint, uniform
 import io
-import base64
-from flask import send_file
+from sklearn.inspection import permutation_importance
+import matplotlib.pyplot as plt
+import seaborn as sns
+
 
 
 
@@ -138,19 +140,22 @@ pipelines_cache = {}
 
 
 
-def plot_feature_importance_to_png(model_pipeline, X, y=None, top_n=20):
-    """
-    Возвращает график важности признаков как PNG в памяти (BytesIO)
-    """
-    import matplotlib.pyplot as plt
-    import seaborn as sns
-    from sklearn.inspection import permutation_importance
 
-    plt.switch_backend('Agg')  
-
+def plot_feature_importance(model_pipeline, X, y=None, top_n=20, save_path=None):
+    """
+    Строит график важности признаков (bar chart) для любой модели.
+    - model_pipeline: обученный пайплайн или модель
+    - X: DataFrame признаков
+    - y: Series меток (только для permutation importance)
+    - top_n: сколько топ признаков показывать
+    - save_path: если указан, сохраняет график в файл
+    Возвращает BytesIO с PNG, если save_path=None
+    """
+    plt.switch_backend('Agg')
+    
     clf = getattr(model_pipeline, "named_steps", {}).get("clf", model_pipeline)
-
-    if hasattr(clf, "feature_importances_"):
+    
+    if hasattr(clf, "feature_importances_"):  
         importances = clf.feature_importances_
         df = pd.DataFrame({"feature": X.columns, "importance": importances})
         df = df.sort_values("importance", ascending=False).head(top_n)
@@ -158,22 +163,21 @@ def plot_feature_importance_to_png(model_pipeline, X, y=None, top_n=20):
         x_col, y_col = "importance", "feature"
         palette = "viridis"
 
-    elif hasattr(clf, "coef_"):
+    elif hasattr(clf, "coef_"):  
         coefs = clf.coef_.ravel()
         df = pd.DataFrame({"feature": X.columns, "coefficient": coefs})
         df = df.sort_values("coefficient", key=abs, ascending=False).head(top_n)
-        title = "Top Feature Coefficients (LogReg)"
+        title = "Top Feature Coefficients (Linear)"
         x_col, y_col = "coefficient", "feature"
         palette = "coolwarm"
 
-    elif y is not None:
+    elif y is not None:  
         result = permutation_importance(clf, X, y, n_repeats=10, random_state=42, n_jobs=-1)
         df = pd.DataFrame({"feature": X.columns, "importance": result.importances_mean})
         df = df.sort_values("importance", ascending=False).head(top_n)
         title = "Top Permutation Importances"
         x_col, y_col = "importance", "feature"
         palette = "magma"
-
     else:
         raise ValueError("Cannot determine feature importance for this model.")
 
@@ -184,11 +188,17 @@ def plot_feature_importance_to_png(model_pipeline, X, y=None, top_n=20):
     plt.ylabel(y_col)
     plt.tight_layout()
 
-    buf = io.BytesIO()
-    plt.savefig(buf, format="png")
-    plt.close()
-    buf.seek(0)
-    return buf
+    if save_path:
+        plt.savefig(save_path, format="png")
+        plt.close()
+        print(f"[Saved plot] {save_path}")
+        return save_path
+    else:
+        buf = io.BytesIO()
+        plt.savefig(buf, format="png")
+        plt.close()
+        buf.seek(0)
+        return buf
 
 def save_model(name, model):
     path = os.path.join(MODELS_DIR, f"{name.replace(' ', '_').lower()}.pkl")
