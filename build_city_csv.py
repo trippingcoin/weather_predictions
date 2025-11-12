@@ -64,7 +64,7 @@ CITY_COORDS = {
 }
 
 end = datetime.utcnow()
-start = end - timedelta(days=7)
+start = end - timedelta(days=30)
 os.makedirs("data", exist_ok=True)
 
 all_records = []
